@@ -1385,6 +1385,22 @@ def _should_skip_update_check(argv: list[str]) -> bool:
     }
 
 
+def _configure_windows_console_encoding() -> None:
+    """Make Chinese CLI output safe on Windows consoles with legacy code pages."""
+    if not IS_WINDOWS:
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            # Redirected or closed streams may not be configurable. Click can
+            # still use the original stream in that situation.
+            continue
+
+
 def main() -> None:
     """
     Console-script entry point for ``omnigent``.
@@ -1406,6 +1422,8 @@ def main() -> None:
     so unhandled exceptions are captured even when the user didn't
     enable ``--log`` or ``--debug-events``.
     """
+    _configure_windows_console_encoding()
+
     cwd = os.getcwd()
     if cwd not in sys.path:
         sys.path.insert(0, cwd)

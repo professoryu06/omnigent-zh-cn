@@ -4184,6 +4184,31 @@ def test_bare_omnigent_harness_flag_dispatches_to_run(
     assert dispatched["target"] is None
 
 
+def test_windows_console_encoding_uses_utf8_when_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chinese distribution help must not fail under a legacy Windows code page."""
+    from omnigent import cli as cli_module
+
+    class _Stream:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, str]] = []
+
+        def reconfigure(self, **kwargs: str) -> None:
+            self.calls.append(kwargs)
+
+    stdout = _Stream()
+    stderr = _Stream()
+    monkeypatch.setattr(cli_module, "IS_WINDOWS", True)
+    monkeypatch.setattr(cli_module.sys, "stdout", stdout)
+    monkeypatch.setattr(cli_module.sys, "stderr", stderr)
+
+    cli_module._configure_windows_console_encoding()
+
+    assert stdout.calls == [{"encoding": "utf-8", "errors": "replace"}]
+    assert stderr.calls == [{"encoding": "utf-8", "errors": "replace"}]
+
+
 def test_bare_omnigent_non_tty_shows_help(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
