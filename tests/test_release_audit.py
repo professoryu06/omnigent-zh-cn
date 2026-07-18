@@ -63,3 +63,42 @@ def test_release_audit_uses_its_parent_as_default_repository(tmp_path: Path) -> 
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(shutil.which("powershell") is None, reason="requires Windows PowerShell")
+def test_release_audit_rejects_secret_remaining_only_in_history(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    audit = root / "scripts" / "audit-release.ps1"
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+
+    fake_key = "sk-" + "0123456789abcdef0123456789abcdef"
+    readme = tmp_path / "README.md"
+    readme.write_text(f"token={fake_key}\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "README.md"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Audit Test",
+            "-c",
+            "user.email=audit@example.invalid",
+            "commit",
+            "-qm",
+            "historical secret fixture",
+        ],
+        check=True,
+    )
+    readme.write_text("safe content\n", encoding="utf-8")
+
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-File", str(audit), "-RepositoryPath", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "Historical possible secret:" in result.stdout
+    assert fake_key not in result.stdout

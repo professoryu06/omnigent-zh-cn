@@ -64,6 +64,23 @@ function Get-CurrentPaths {
     if ($LASTEXITCODE -ne 0) { throw 'Unable to read Git file list.' }
 }
 
+function Get-HistoricalSecretPaths {
+    param([string]$Commit)
+
+    # Let Git search only text blobs in the commit. Reading every historical
+    # file with `git show` makes a full-source release audit unnecessarily
+    # slow, especially for the bundled web application and binary assets.
+    $matches = @(& git -C $repository grep -I -l -E -i `
+        -e '\b(sk|ghp)-[A-Za-z0-9_-]{20,}\b' `
+        -e '\bgithub_pat_[A-Za-z0-9_]{20,}\b' `
+        -e '\bAKIA[0-9A-Z]{16}\b' `
+        $Commit --)
+    if ($LASTEXITCODE -notin @(0, 1)) {
+        throw "Unable to scan historical commit $Commit for secrets."
+    }
+    return @($matches | ForEach-Object { $_ -replace '^[^:]+:', '' })
+}
+
 $findings = [System.Collections.Generic.List[string]]::new()
 $currentPaths = @(Get-CurrentPaths)
 
@@ -95,8 +112,9 @@ foreach ($commit in $commits) {
     foreach ($path in $paths) {
         if (Test-BlockedPath $path) {
             $findings.Add("Historical blocked path: $commit $path")
-            continue
         }
+    }
+    foreach ($path in Get-HistoricalSecretPaths $commit) {
         $content = & git -C $repository show "${commit}:$path" 2>$null | Out-String
         if (Test-SecretContent $content) {
             $blobId = (& git -C $repository rev-parse "${commit}:$path").Trim()

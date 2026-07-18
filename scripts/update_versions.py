@@ -87,19 +87,19 @@ def packages(root: Path) -> list[Package]:
     """
     return [
         Package(
-            "omnigent",
+            "omnigent-zh-cn",
             root / "pyproject.toml",
-            ("omnigent-client", "omnigent-ui-sdk"),
+            ("omnigent-zh-cn-client", "omnigent-zh-cn-ui-sdk"),
         ),
         Package(
-            "omnigent-client",
+            "omnigent-zh-cn-client",
             root / "sdks" / "python-client" / "pyproject.toml",
-            ("omnigent",),
+            ("omnigent-zh-cn",),
         ),
         Package(
-            "omnigent-ui-sdk",
+            "omnigent-zh-cn-ui-sdk",
             root / "sdks" / "ui" / "pyproject.toml",
-            ("omnigent-client",),
+            ("omnigent-zh-cn-client",),
         ),
     ]
 
