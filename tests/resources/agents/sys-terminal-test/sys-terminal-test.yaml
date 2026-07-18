@@ -1,0 +1,45 @@
+# sys-terminal-test agent — exercises the AP-side ``sys_terminal_*``
+# tool family through Omnigent mode integration.
+#
+# This is an OMNIGENT-FLAVORED YAML (no ``spec_version: 1``).
+# Per ``designs/OMNIGENT_TERMINAL_BRIDGE.md`` §3 (Non-goals), AP-native
+# YAML cannot declare ``terminals:`` — that grammar lives only on
+# the omnigent-compat path. The compat translator threads
+# ``AgentDef.terminals`` → ``AgentSpec.terminals`` so the
+# ``sys_terminal_*`` tools register on the AP-side ToolManager.
+#
+# Used by ``tests/e2e/test_sys_terminal_e2e.py``.
+
+name: sys-terminal-test
+prompt: |
+  You are a terminal test assistant. You drive a tmux ``bash``
+  terminal via the ``sys_terminal_*`` tools and report back what
+  you see.
+
+  Standard flow:
+  1. Use ``sys_terminal_launch`` to start ``bash`` with session ``s1``.
+  2. Use ``sys_terminal_send`` to type a command followed by ``Enter``.
+  3. Wait briefly, then ``sys_terminal_read`` to capture the pane.
+  4. Report the relevant output verbatim — markers in particular.
+
+  Keep responses concise. When the user asks "say hi", just say hi
+  in 5 words and don't touch the terminals.
+
+executor:
+  model: databricks-claude-sonnet-4-6
+  harness: claude-sdk
+  profile: test-profile
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none
+
+terminals:
+  bash:
+    command: bash
+    os_env:
+      type: caller_process
+      sandbox:
+        type: none

@@ -1,0 +1,45 @@
+# Agent that uses Claude Code as the execution harness.
+#
+# Claude Code provides powerful built-in tools (Bash, file Read/Edit, etc.)
+# plus any Omnigent tools you define are passed to it as MCP tools.
+#
+# Requirements:
+#   pip install claude-agent-sdk   (for SDK mode, preferred)
+#   OR
+#   npm install -g @anthropic-ai/claude-code   (for CLI fallback mode)
+#
+# Environment:
+#   export ANTHROPIC_API_KEY=your-key
+#
+# Usage:
+#   # Interactive coding session with custom tools
+#   python -m omnigent examples/claude_code_agent.yaml
+#
+#   # One-shot coding task
+#   python -m omnigent examples/claude_code_agent.yaml \
+#       --prompt "Find all TODO comments and create a summary"
+#
+#   # Override model
+#   python -m omnigent examples/claude_code_agent.yaml \
+#       --harness claude-sdk
+
+name: code_assistant
+prompt: |
+  You are a coding assistant. Use your tools to read, edit, and run code.
+  You also have custom tools for calculations and time lookups.
+
+executor:
+  harness: claude-sdk
+
+tools:
+  # These Omnigent tools are passed to Claude Code as MCP tools,
+  # available alongside Claude Code's built-in Bash, Read, Edit, etc.
+  calculate:
+    type: function
+    description: "Evaluate a mathematical expression safely."
+    callable: tests.resources.examples._shared.tool_functions.calculate
+
+  get_current_time:
+    type: function
+    description: "Get the current date and time for a given timezone."
+    callable: tests.resources.examples._shared.tool_functions.get_current_time

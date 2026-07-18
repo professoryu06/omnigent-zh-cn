@@ -1,0 +1,4 @@
+{
+    "exit_code": {"kind": "exact", "value": 0},
+    "recalled_prompt_in_input_area": {"kind": "exact", "value": true}
+}

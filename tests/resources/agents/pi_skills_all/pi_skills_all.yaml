@@ -1,0 +1,21 @@
+# Pi skills e2e fixture — `skills: all`.
+#
+# Bundle layout: a top-level `skills/` directory with two
+# distinctively-named SKILL.md files. The Pi executor's
+# `_resolve_pi_skill_args` emits `--skill <bundle_path>` for each
+# bundled skill while leaving Pi's host auto-discovery on.
+#
+# Used by `tests/e2e/test_pi_skills_filter_e2e.py`. The skill names
+# contain a unique suffix (`c4a8d5` / `d2f6e1`) so the test can
+# string-match the agent's output and prove Pi actually loaded the
+# skills (model can't hallucinate the suffix).
+name: pi_skills_all_agent
+prompt: |
+  You are a tester agent. When asked to list your skills, output
+  every skill name you can see in your environment, exactly as the
+  names appear, one per line. Do not abbreviate. Do not paraphrase.
+  Do not invent skills you don't see.
+skills: all
+executor:
+  harness: pi
+  model: databricks-claude-sonnet-4-6

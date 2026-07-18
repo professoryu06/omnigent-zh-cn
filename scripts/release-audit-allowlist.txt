@@ -1,0 +1,5 @@
+# Approved synthetic-token fixtures. Each entry is path|Git blob SHA-1.
+# A content change changes the blob ID and forces a new audit review.
+tests/onboarding/test_interactive.py|dd34e92f1d8583c0e1afa11fc3b5cb212f55088d
+tests/test_antigravity_native_bridge.py|3c863094cb8412c83131ce0f565cba9c68dec3c1
+tests/test_model_catalog.py|afeb9180e954b22d9741fc602f032a69c444d368

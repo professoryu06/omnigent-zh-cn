@@ -1,0 +1,185 @@
+# Agent with os_env using the darwin_seatbelt sandbox — macOS parity
+# variant of examples/agent_with_os_env_bwrap.yaml.
+#
+# What this example demonstrates:
+#   - Spawn-time isolation via Apple's ``sandbox-exec`` (Seatbelt) tool:
+#     the helper subprocess runs under an SBPL profile that denies the
+#     whole filesystem by default and explicitly allows only the paths
+#     the spec lists.
+#   - Read-only cwd by default. The agent can ``sys_os_read`` files
+#     under cwd but every ``sys_os_write`` / ``sys_os_edit`` /
+#     redirect-via-shell attempt is rejected with EPERM.
+#   - Dotfiles / dotdirs anywhere under cwd are masked recursively.
+#     ``.env``, ``.git/``, ``.aws/``, ``.ssh/``, ``services/api/.env``,
+#     etc. are all unreadable inside the sandbox. The default allowlist
+#     passes through ``.venv`` (matched by basename, so nested venvs
+#     work too); extend it with ``cwd_allow_hidden:`` for ``.git``,
+#     ``.gitignore``, etc. The recursive scan is bounded by
+#     ``cwd_hidden_scan_max_entries`` (default 50000); behavior at the
+#     cap is controlled by ``cwd_hidden_scan_overflow``.
+#   - A pre-generated writable scratch directory mounted as
+#     ``$TMPDIR``. Use this for any artifact the agent needs to produce
+#     while keeping the real cwd untouched.
+#   - Environment-variable allowlist (identical semantics to the bwrap
+#     backend). The parent's full shell env is filtered down to a
+#     minimal default; anything else has to be opted in per spec via
+#     ``env_passthrough``.
+#
+# How macOS Seatbelt differs from Linux bwrap (known deltas):
+#   - **No PID / UTS / IPC namespaces.** macOS has no equivalent of
+#     Linux namespaces, so the helper sees the host's process table
+#     (it can ``ps -ef``) and the same hostname. Filesystem, network,
+#     and per-file access checks are still enforced.
+#   - **No seccomp.** Syscall-level filtering (``unshare``,
+#     ``setns``, ``clone3``, socket-family allowlist) is not available
+#     on macOS. The Seatbelt profile enforces filesystem + network
+#     access; everything else is the host kernel's default policy.
+#   - **Masking is "deny", not "invisible".** On bwrap, masked
+#     dotfiles disappear via a tmpfs / ``/dev/null`` bind. On Seatbelt
+#     they exist in ``readdir`` but return EPERM on open. The agent
+#     cannot read their contents either way; only the error message
+#     differs.
+#   - **Profile size cap.** ``sandbox-exec`` rejects SBPL profiles
+#     larger than ~32 KiB. The walker bound (``max_entries`` /
+#     ``cwd_hidden_scan_overflow``) protects against accidentally
+#     blowing the cap on huge monorepos.
+#
+# Requirements:
+#   - macOS host with ``/usr/bin/sandbox-exec`` (present on every
+#     stock macOS install). The spec resolver hard-errors at
+#     spec-load time on Linux or when the binary is missing — there
+#     is no silent fallback.
+#   - On macOS, ``darwin_seatbelt`` IS the platform default; setting
+#     it explicitly is purely for clarity / portability of this YAML.
+#
+# Helper Python interpreter under $HOME (uv / pyenv / asdf):
+#   When ``argv[0]`` (the parent's ``sys.executable``) resolves to a
+#   binary under ``$HOME`` — the common case with ``uv run`` (Python
+#   under ``~/.local/share/uv/python/cpython-X.Y.Z-...``), pyenv
+#   (``~/.pyenv/versions/<ver>``), or asdf
+#   (``~/.asdf/installs/python/<ver>``) — the sandbox refuses to
+#   silently widen its read view to ``/Users`` (that would expose
+#   every other user's home + credentials). Instead it detects the
+#   self-contained CPython install root (``<root>/bin/python*`` plus
+#   ``<root>/lib/python*`` or ``<root>/lib/libpython*``) and grants a
+#   narrow ``(subpath <root>)`` allow on that directory only. A
+#   WARNING is logged on each spawn so the auto-widen is auditable.
+#   If the layout doesn't match the canonical CPython install shape
+#   (custom interpreter wrappers, manually-built binaries under
+#   ``$HOME``), the spawn fails with an OSError that names the
+#   offending path and lists three concrete remediations.
+#
+# Usage:
+#   # Read-only cwd should let the agent inspect this repo but reject
+#   # any write attempt:
+#   uv run omnigent run examples/agent_with_os_env_seatbelt.yaml \
+#       --profile <profile> \
+#       --prompt "List files in cwd with ls -la, then try to write 'x' to a file named blocked.txt and report what happens."
+#
+#   # Dotfile masking smoke test — even with shell access the agent
+#   # cannot read host secrets that live behind dotfiles:
+#   uv run omnigent run examples/agent_with_os_env_seatbelt.yaml \
+#       --profile <profile> \
+#       --prompt "Try to cat .env, .git/config, and ~/.aws/credentials. Report exactly what each command prints."
+#
+#   # Writable scratch tmpdir — the agent can build artifacts under
+#   # $TMPDIR even though cwd is read-only:
+#   uv run omnigent run examples/agent_with_os_env_seatbelt.yaml \
+#       --profile <profile> \
+#       --prompt "Use sys_os_shell to write 'hello' to \$TMPDIR/note.txt, then read it back."
+#
+# Notes:
+#   - Flip `allow_network: true` to `false` to deny all outbound
+#     sockets (loopback to the egress relay is still permitted when
+#     ``egress_rules`` is set).
+#   - Make cwd writable by setting `write_paths: [.]` (commented
+#     out below) -- useful for "edit the project in place" workflows.
+#   - Set `start_in_scratch: true` (top-level under `os_env`) to boot
+#     the helper inside the writable `$TMPDIR` instead of the
+#     workspace cwd.
+
+name: assistant_with_os_env_seatbelt
+prompt: |
+  You are a helpful assistant running inside a hardened macOS sandbox.
+  You have access to the built-in `sys_os_read`, `sys_os_write`,
+  `sys_os_edit`, and `sys_os_shell` tools.
+
+  The current working directory is read-only by default. Use
+  `$TMPDIR` (a per-session writable scratch directory) for any files
+  you need to create. Top-level dotfiles in the cwd are hidden by the
+  sandbox — if a tool reports that `.env` or `.git/config` cannot be
+  opened, that is the sandbox denying it, not a real absence.
+
+executor:
+  model: databricks-gpt-5-4-mini
+  profile: test-profile
+
+os_env:
+  type: caller_process
+  cwd: .
+
+  # Optional: boot the helper subprocess inside the writable scratch
+  # tmpdir instead of cwd. Useful when the agent's natural pattern is
+  # to write artifacts to the current directory ("./out.txt", "make
+  # build", etc.) -- the workspace stays read-only and bound at its
+  # original absolute path for reads, while every relative-path write
+  # lands in the disposable scratch dir. Mutually exclusive with
+  # `fork`. Default false (helper boots in cwd).
+  # start_in_scratch: true
+
+  sandbox:
+    type: darwin_seatbelt
+
+    # Optional: allow specific dotfile / dotdir basenames through the
+    # recursive cwd dotfile mask. Default is [".venv"] so common
+    # Python project layouts keep working. Matching is by basename at
+    # any depth. Entries must be plain names — no ``/``, no ``..``,
+    # no absolute paths (validated at spec parse time).
+    # cwd_allow_hidden: [".venv", ".git", ".gitignore"]
+
+    # Optional: cap on the number of filesystem entries the recursive
+    # dotfile walker visits under cwd. ``node_modules`` is walked LAST
+    # so the budget masks the project's own dotfiles first. Default
+    # 50000 is enough for most repos; raising it is fine on small
+    # projects but watch the SBPL profile size cap (~32 KiB) on huge
+    # monorepos.
+    # cwd_hidden_scan_max_entries: 100000
+
+    # Optional: what to do when ``cwd_hidden_scan_max_entries`` is
+    # reached. Same options as the bwrap backend: "warn" (default,
+    # partial mask + warning), "error" (fail loud; use for untrusted
+    # trees), "unlimited" (no cap).
+    # cwd_hidden_scan_overflow: error
+
+    # Optional: make cwd writable. Default is read-only.
+    # write_paths: ["."]
+
+    # Optional: extra read-only roots visible to the helper.
+    # read_paths:
+    #   - /opt/some/reference/data
+
+    # Optional: extra environment variables the helper subprocess is
+    # allowed to inherit beyond the always-passed default. Identical
+    # semantics to the bwrap backend.
+    # env_passthrough:
+    #   - AWS_PROFILE
+    #   - GITHUB_TOKEN
+
+    # Network access. Set to ``false`` to add a Seatbelt
+    # ``(deny network*)`` rule that blocks every outbound socket.
+    allow_network: true
+
+    # Optional: L7 egress policy — fine-grained HTTP(S) request
+    # filtering with TLS interception and hard enforcement. Same DSL
+    # and semantics as the bwrap backend; when set, the SBPL profile
+    # denies network* except for loopback (to reach the in-sandbox
+    # TCP→Unix relay) and the bind-mounted Unix socket (which talks
+    # to the parent-side MITM proxy). Direct-TCP bypass attempts get
+    # ECONNREFUSED.
+    # egress_rules:
+    #   - "GET api.github.com/repos/myorg/**"
+    #   - "GET,POST pypi.org/**"
+    #   - "* *.amazonaws.com/**"
+    egress_rules:
+      - "GET httpbin.org/get"
+      - "GET httpbin.org/status/*"

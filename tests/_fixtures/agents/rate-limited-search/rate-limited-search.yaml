@@ -1,0 +1,19 @@
+name: rate-limited-search
+description: |
+  Ported from omnigent `examples/rate_limited_search_agent.yaml`.
+  Demonstrates stateful FunctionPolicy + ASK after budget
+  exhaustion.
+
+executor:
+  model: gpt-4o
+
+prompt: Test fixture for stateful rate-limit FunctionPolicy.
+
+ask_timeout: 30
+
+policies:
+  search_rate_limit:
+    type: function
+    handler: tests._fixtures.agents.rate_limit_policies.rate_limit_search
+    factory_params:
+      limit: 3

@@ -1,0 +1,16 @@
+name: sdk-chat-builtin
+description: >
+  Minimal Claude Agent SDK chat agent. Used as a built-in fork-switch
+  TARGET in the native→SDK e2e (a plain, deterministic claude-sdk agent —
+  unlike the polly supervisor — so a recall assertion isn't flaky). The
+  Claude Agent SDK authenticates via the claude CLI's OAuth session, so this
+  needs no API key and runs on the host daemon like claude-native.
+
+executor:
+  harness: claude-sdk
+  model: claude-sonnet-4-20250514
+
+prompt: |
+  You are a concise assistant. Answer the user directly in as few words as
+  possible. When the user asks you to recall something stated earlier in the
+  conversation, reply with exactly that and nothing else.

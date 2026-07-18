@@ -1,0 +1,25 @@
+# skills_list — fixture for skills_filter=[name, ...] (named subset).
+#
+# Exercises the spec/runtime/harness pipeline that surfaces a
+# specific named subset of host-discovered Claude Code skills.
+# The harness wrap should produce
+# ``ClaudeAgentOptions(skills=[name1, name2], setting_sources=None)``
+# so the SDK auto-defaults ``setting_sources=["user","project"]``
+# and discovers the named skills under those scopes.
+#
+# Used by tests/runtime/test_workflow.py::
+# test_skills_filter_pipeline_e2e to verify list values
+# round-trip through the JSON-encoded ``HARNESS_CLAUDE_SDK_SKILLS_FILTER``
+# env var with element order preserved.
+name: skills_list_agent
+prompt: A simple agent for skills=[...] pipeline tests.
+skills:
+  - claude-api
+  - mlflow-onboarding
+executor:
+  # ``harness: claude-sdk`` is required so the spec validates;
+  # the test loads the spec but does not actually spawn the
+  # harness subprocess (it patches ``ClaudeSDKExecutor.__init__``
+  # to capture the constructor kwargs).
+  harness: claude-sdk
+  model: databricks-claude-sonnet-4-6

@@ -1,0 +1,23 @@
+# Test server config with policies for PreToolUse/PostToolUse enforcement.
+#
+# Usage:
+#   omnigent server --config tests/resources/examples/server_config_with_policies.yaml
+#
+# Then in another terminal:
+#   omnigent claude <your-agent.yaml>
+#
+# Try:
+#   - Ask Claude to run "rm -rf /tmp/test" → should be DENIED by block_bash_rm
+#   - Ask Claude to run "ls /tmp" → should be ALLOWED
+#   - Ask Claude to run "cat /etc/passwd" → result flagged by block_sensitive_output
+
+policies:
+  # TOOL_CALL phase: blocks destructive rm commands in Bash
+  block_bash_rm:
+    type: function
+    handler: tests.resources.examples._shared.native_tool_policies.block_bash_rm
+
+  # TOOL_RESULT phase: flags sensitive data in tool output
+  block_sensitive_output:
+    type: function
+    handler: tests.resources.examples._shared.native_tool_policies.block_sensitive_output

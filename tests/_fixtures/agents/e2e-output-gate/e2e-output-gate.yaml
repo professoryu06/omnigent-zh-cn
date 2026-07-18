@@ -1,0 +1,24 @@
+name: e2e-output-gate
+description: |
+  E2E fixture: OUTPUT-phase policy enforcement.
+
+executor:
+  model: gpt-4o
+
+prompt: |
+  # E2E output-gate agent
+
+  You are a test agent. Reply briefly to the user (under 20
+  words). Plain text only. Do not mention policies or
+  guardrails.
+
+policies:
+  ask_on_output:
+    type: function
+    on: [response]
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: ask
+        reason: Review assistant reply before releasing.
+        on_phases: [response]

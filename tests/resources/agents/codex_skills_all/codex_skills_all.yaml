@@ -1,0 +1,22 @@
+# Codex skills e2e fixture — `skills: all`.
+#
+# Bundle layout: a top-level `skills/` directory with two
+# distinctively-named SKILL.md files. The codex executor's
+# `_populate_codex_skills` symlinks bundle skills (priority over
+# host) into the per-conversation `$CODEX_HOME/skills/` based on
+# the spec's `skills:` field.
+#
+# Used by `tests/e2e/test_codex_skills_filter_e2e.py`. The skill
+# names contain a unique suffix (`a3f9c2` / `b8d4e7`) so the test
+# can string-match the agent's output and prove codex actually
+# saw the skills (model can't hallucinate the suffix).
+name: codex_skills_all_agent
+prompt: |
+  You are a tester agent. When asked to list your skills, output
+  every skill name you can see in your environment, exactly as the
+  names appear, one per line. Do not abbreviate. Do not paraphrase.
+  Do not invent skills you don't see.
+skills: all
+executor:
+  harness: codex
+  model: databricks-gpt-5-4-mini

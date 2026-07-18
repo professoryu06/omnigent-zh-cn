@@ -1,0 +1,101 @@
+# Example: Secure Research Agent with Labels and Policies
+#
+# This agent demonstrates the label system for information flow control.
+# It has two security dimensions:
+#   - confidentiality: "0" (public only) -> "1" (has seen confidential data)
+#   - integrity: "1" (clean) -> "0" (has consumed untrusted/web content)
+#
+# Label changes are managed entirely by policies (not by tools), so you can
+# add or modify label effects without touching tool definitions.
+#
+# Enforcement policies:
+#   - If both high-confidentiality AND low-integrity: shell DENIED
+#   - If high-confidentiality only: shell requires ASK (user approval)
+#   - If low-integrity only: shell and file writes require ASK
+#
+# The ask_timeout ensures agents don't block forever if the user is away.
+
+name: secure_research_assistant
+prompt: |
+  You are a research assistant that can search the web, read internal
+  confidential documents, and run shell commands.
+
+  Be aware that your actions are governed by a security policy:
+  - Searching the web lowers your integrity level (untrusted content).
+  - Reading confidential documents raises your confidentiality level.
+  - Shell commands may be restricted based on your current security labels,
+    which means that you can still run them, but users will be asked to approve.
+  - If you cannot get approval for a restricted action, find an alternative.
+  - Use `run_shell` for command execution in this demo.
+
+labels:
+  confidentiality: "0"
+  integrity: "1"
+
+label_schema:
+  confidentiality:
+    values: ["0", "1"]
+  integrity:
+    values: ["0", "1"]
+
+ask_timeout: 30
+policy_transparency: true
+
+executor:
+  model: databricks-claude-sonnet-4-6
+
+tools:
+  search_web:
+    type: function
+    description: Search the web for public information.
+    callable: tests.resources.examples._shared.tool_functions.web_search
+
+  read_internal_doc:
+    type: function
+    description: Read an internal confidential document by ID.
+    callable: tests.resources.examples._shared.tool_functions.read_internal_doc
+
+  run_shell:
+    type: function
+    description: Run a shell command in the demo environment.
+    callable: tests.resources.examples._shared.tool_functions.run_shell
+
+  write_file:
+    type: function
+    description: Write a file in the demo environment.
+    callable: tests.resources.examples._shared.tool_functions.write_file
+
+policies:
+  # --- Label-setting policies (ALLOW + set_labels) ---
+  # These run on tool_call and set labels when the tool is invoked.
+
+  taint_web_search:
+    type: function
+    handler: tests.resources.examples._shared.secure_research_policies.taint_web_search
+
+  taint_confidential_read:
+    type: function
+    handler: tests.resources.examples._shared.secure_research_policies.taint_confidential_read
+
+  # --- Enforcement policies ---
+  # These check session_state labels and DENY or ASK based on state.
+  # Order matters: stricter policies first.
+
+  deny_contaminated_shell:
+    type: function
+    handler: tests.resources.examples._shared.secure_research_policies.deny_contaminated_shell
+
+  ask_high_confidentiality:
+    type: function
+    handler: tests.resources.examples._shared.secure_research_policies.ask_high_confidentiality
+
+  ask_low_integrity:
+    type: function
+    handler: tests.resources.examples._shared.secure_research_policies.ask_low_integrity
+
+  # Safety net
+  rate_limit:
+    type: function
+    handler: tests.resources.examples._shared.rate_limit_policy.max_tool_calls_per_turn
+    factory_params:
+      limit: 15

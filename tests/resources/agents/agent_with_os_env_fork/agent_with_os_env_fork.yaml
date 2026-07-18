@@ -1,0 +1,53 @@
+# Agent with os_env fork mode — copy-on-write isolation.
+#
+# The agent gets a forked snapshot of the working directory.  It can read,
+# write, edit, and run shell commands freely — all changes stay inside the
+# fork and the original files are never modified.
+#
+# This is useful for:
+#   - Letting an agent experiment with code changes without risk.
+#   - Running untrusted tool output through shell commands safely.
+#   - Creating "what-if" sub-agents that explore changes in isolation.
+#
+# How it works:
+#   At startup the framework creates a hardlink tree of the cwd.  Hardlinks
+#   share data on disk (O(1) space) until one side writes, at which point
+#   the link is broken and the write goes to a private copy.  Shell commands
+#   trigger a bulk hardlink-break on first use so redirects like
+#   `echo x > file` don't leak back to the original.
+#
+# Usage:
+#   # Set up a scratch area to see the isolation in action:
+#   mkdir -p /tmp/fork-demo && echo "original content" > /tmp/fork-demo/notes.txt
+#
+#   # Run the agent — it will modify notes.txt inside the fork:
+#   python -m omnigent examples/agent_with_os_env_fork.yaml \
+#       --prompt "Read notes.txt, then overwrite it with 'agent was here', then read it again."
+#
+#   # Verify the original is untouched:
+#   cat /tmp/fork-demo/notes.txt   # still "original content"
+#
+# Notes:
+#   - fork: true can be combined with sandbox settings for defense-in-depth.
+#   - The fork is cleaned up automatically when the session closes.
+#   - On macOS or other non-Linux systems, change sandbox.type to "none".
+
+name: sandboxed_experimenter
+prompt: |
+  You are a helpful assistant with access to an isolated copy of a project
+  directory.  Any file changes you make are safe — they only affect your
+  private fork, not the real files.
+
+  Use the built-in `sys_os_read`, `sys_os_write`, `sys_os_edit`, and
+  `sys_os_shell` tools to inspect and modify files.
+
+executor:
+  model: databricks-gpt-5-4-mini
+  profile: test-profile
+
+os_env:
+  type: caller_process
+  cwd: /tmp/fork-demo
+  fork: true
+  sandbox:
+    type: none          # fork already provides write isolation

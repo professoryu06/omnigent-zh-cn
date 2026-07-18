@@ -1,0 +1,52 @@
+# Fly.io config for Omnigent. Deploy with the CLI from this directory:
+#   fly deploy -c deploy/fly/fly.toml
+# Pulls the prebuilt image directly (the fast CLI path). Pairs with SQLite on a
+# persistent volume by default — no separate database app. Full walkthrough
+# (volume, memory, and the web-UI Launch path): deploy/fly/README.md.
+
+app = "omnigent"           # change to your app name
+primary_region = "iad"       # pick a region: fly platform regions
+
+[build]
+  image = "ghcr.io/omnigent-ai/omnigent-server:latest"
+  # For the Fly web-UI Launch (which always builds + pushes to registry.fly.io
+  # and has no external-image mode), swap the line above for:
+  #   dockerfile = "deploy/docker/Dockerfile.prebuilt"
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "8000"
+  ARTIFACT_DIR = "/data/artifacts"
+  OMNIGENT_ADMIN_CREDENTIALS_PATH = "/data/admin-credentials"
+  OMNIGENT_AUTH_PROVIDER = "accounts"
+  # SQLite on the persistent volume — no separate Postgres app needed. For
+  # multi-instance, point DATABASE_URL at a Postgres URL (here or via
+  # `fly secrets set`); the entrypoint normalizes postgres:// automatically.
+  DATABASE_URL = "sqlite:////data/artifacts/chat.db"
+  # Cookie secret is minted on the volume (persists); base URL auto-detected
+  # from FLY_APP_NAME (-> <app>.fly.dev).
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+
+# Persistent artifact + SQLite store. Create the volume first:
+#   fly volumes create artifact_data --size 1 --region <region>
+[mounts]
+  source = "artifact_data"
+  destination = "/data/artifacts"
+
+# The server idles around ~275 MB RSS, so the 256 MB default machine OOM-loops.
+# 1 GB gives headroom for active sessions.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

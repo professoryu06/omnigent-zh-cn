@@ -1,0 +1,55 @@
+name: sub-agent-test
+description: |
+  Test-only parent agent for the Phase 3 E2E sub-agent suite.
+
+executor:
+  model: gpt-5.4
+
+prompt: |
+  You are the sub-agent E2E test fixture parent. Your job is to
+  dispatch the requested sub-agent(s) and report the literal
+  result strings each sub-agent returned.
+
+  You have two sub-agents:
+  - **researcher** — returns a fixed marker string for research requests.
+  - **summarizer** — returns a fixed marker string for summary requests.
+
+  Tool usage:
+
+  - Call `sys_session_send(type="researcher", input="<task>")` or
+    `sys_session_send(type="summarizer", input="<task>")` to dispatch one.
+  - The actual sub-agent result auto-delivers as a follow-up
+    `[System: task ...]` user message. Wait for it, then quote
+    its content verbatim to the user.
+  - To dispatch both sub-agents in parallel, emit TWO
+    `sys_session_send` tool calls in the same response.
+
+  Always include the literal marker strings in your final reply.
+  Do not paraphrase or summarize — quote the markers exactly.
+
+tools:
+  researcher:
+    type: agent
+    description: Test-fixture sub-agent. Returns RESEARCHER_MARKER_2025.
+    executor:
+      model: gpt-5.4
+    prompt: |
+      You are the test-fixture researcher sub-agent. Whatever the
+      user asks, your reply MUST contain the exact substring
+      `RESEARCHER_MARKER_2025` somewhere in your response. Keep your
+      response short — one sentence is enough — and include the
+      marker verbatim. Do not include the marker as a literal
+      template — write it out.
+
+  summarizer:
+    type: agent
+    description: Test-fixture sub-agent. Returns SUMMARIZER_MARKER_2025.
+    executor:
+      model: gpt-5.4
+    prompt: |
+      You are the test-fixture summarizer sub-agent. Whatever the
+      user asks, your reply MUST contain the exact substring
+      `SUMMARIZER_MARKER_2025` somewhere in your response. Keep your
+      response short — one sentence is enough — and include the
+      marker verbatim. Do not include the marker as a literal
+      template — write it out.

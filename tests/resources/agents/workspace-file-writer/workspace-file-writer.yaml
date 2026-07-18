@@ -1,0 +1,25 @@
+# workspace-file-writer — minimal os_env agent used by
+# tests/e2e/test_workspace_and_file_comments_e2e.py to exercise the
+# workspace changed-files feature end-to-end.
+#
+# The agent writes a single file via sys_os_write so the
+# ConversationWorkspaceRegistry can attribute the write to the
+# conversation.  No harness-specific auth is required — the
+# executor.model is rewritten to a Databricks equivalent when
+# --profile is passed to pytest.
+
+name: workspace-file-writer
+prompt: |
+  You are a minimal file-writing assistant.
+  When the user asks you to write a file, call sys_os_write with the
+  exact path and content they specify. Do nothing else — no
+  explanations, no extra steps. Confirm with one short sentence.
+
+executor:
+  model: gpt-5.4-mini
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none

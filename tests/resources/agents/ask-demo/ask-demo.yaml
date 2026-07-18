@@ -1,0 +1,25 @@
+name: ask-demo
+description: |
+  Minimal demo agent for Phase 10 (REPL approval prompt).
+  A single policy at INPUT always ASKs — so every user
+  turn pauses on a y/n approval prompt in ``omnigent chat``.
+
+executor:
+  model: gpt-4o
+
+prompt: |
+  # Ask-demo agent
+
+  You are a tiny demo agent. Reply briefly (under 20 words).
+  Used to demonstrate the policy approval prompt in `omnigent chat`.
+
+policies:
+  always_ask_on_input:
+    type: function
+    on: [request]
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: ask
+        reason: Confirm this message before I process it.
+        on_phases: [request]

@@ -1,0 +1,37 @@
+name: e2e-subagent-gate
+description: |
+  E2E fixture: sub-agent elicitation tunneling.
+
+executor:
+  model: gpt-4o
+
+prompt: |
+  # E2E sub-agent-gate parent
+
+  You are a supervisor agent. For every user message, you MUST
+  spawn the ``worker`` sub-agent with the user's message as
+  its input. After the worker returns, summarize its reply in
+  one short sentence. Never handle the user's message directly.
+
+tools:
+  worker:
+    type: agent
+    description: |
+      Minimal sub-agent with an INPUT-phase ASK policy.
+    executor:
+      model: gpt-4o
+    prompt: |
+      # Worker sub-agent
+
+      You are a worker. Respond briefly to whatever the supervisor
+      delegates (under 15 words). Plain text only.
+    policies:
+      worker_input_gate:
+        type: function
+        on: [request]
+        function:
+          path: omnigent.policies.function.make_fixed_action_callable
+          arguments:
+            action: ask
+            reason: Confirm the worker may process this delegation.
+            on_phases: [request]

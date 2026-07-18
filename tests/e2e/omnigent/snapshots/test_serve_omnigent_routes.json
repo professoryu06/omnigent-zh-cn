@@ -1,0 +1,6 @@
+{
+    "health_status": {"kind": "exact", "value": 200},
+    "agents_list_status": {"kind": "exact", "value": 200},
+    "agents_has_hello_world": {"kind": "exact", "value": true},
+    "responses_unknown_agent_status": {"kind": "exact", "value": 404}
+}

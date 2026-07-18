@@ -1,0 +1,26 @@
+# Hello World — the simplest possible Omnigent agent.
+#
+# Quick start:
+#
+#   1. Install the dependency:
+#      pip install openai
+#
+#   2. Set your Databricks credentials:
+#      export DATABRICKS_CONFIG_PROFILE=<your-profile>
+#
+#   3. Run it:
+#      cd omnigent
+#      python -m omnigent examples/hello_world.yaml --prompt "Hello!"
+#
+#   4. Or run interactively:
+#      python -m omnigent examples/hello_world.yaml
+#
+# The model name below is for Databricks-hosted Claude via the FM API.
+# If you want to use a different model, override with --model:
+#      python -m omnigent examples/hello_world.yaml --model databricks-meta-llama-3.3-70b-instruct
+
+name: hello_world
+prompt: You are a friendly assistant. Say hello and answer questions.
+
+executor:
+  model: databricks-claude-sonnet-4-6

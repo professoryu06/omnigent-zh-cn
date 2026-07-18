@@ -1,0 +1,53 @@
+# Agent with Unity Catalog tools — demonstrates UC function calling.
+#
+# This agent uses tools backed by Databricks SQL functions, including
+# the built-in `ai_query` function.
+#
+# Usage:
+#   export DATABRICKS_CONFIG_PROFILE=<your-profile>
+#   export DATABRICKS_WAREHOUSE_ID=<your-sql-warehouse-id>
+#
+#   python -m omnigent tests/resources/examples/agent_with_uc_tools.yaml \
+#       --prompt "Use ask_llm to summarize: Databricks Unity Catalog is great"
+#
+# The runner executes UC functions via the SQL Statement Execution API.
+# The warehouse ID is read from the DATABRICKS_WAREHOUSE_ID env var at
+# execution time (or can be set per-tool via warehouse_id: in the YAML).
+
+name: uc_tool_agent
+prompt: |
+  You are a helpful assistant with access to Databricks AI functions.
+  When the user asks you to summarize or analyze text, use the ask_llm tool.
+  Always use 'databricks-claude-sonnet-4-6' as the endpoint.
+
+executor:
+  harness: openai-agents
+  model: databricks-gpt-5-4-mini
+  auth:
+    type: databricks
+    profile: oss
+
+tools:
+  # Built-in ai_query function — calls a model serving endpoint.
+  # Works on any workspace with model serving enabled (pro/serverless SQL warehouse).
+  # warehouse_id is resolved from DATABRICKS_WAREHOUSE_ID env var at runtime.
+  ask_llm:
+    type: function
+    description: "Query a Databricks-hosted LLM via ai_query. Pass the endpoint name and a prompt string."
+    catalog_path: ai_query
+    parameters:
+      type: object
+      properties:
+        endpoint:
+          type: string
+          description: "Model serving endpoint name, e.g. 'databricks-claude-sonnet-4-6'."
+        prompt:
+          type: string
+          description: "The prompt to send to the model."
+      required: [endpoint, prompt]
+
+  # To add a custom UC function, uncomment and replace with your own:
+  classify_text:
+    type: function
+    description: "Classify the sentiment of the given text."
+    catalog_path: my_catalog.my_schema.classify_sentiment

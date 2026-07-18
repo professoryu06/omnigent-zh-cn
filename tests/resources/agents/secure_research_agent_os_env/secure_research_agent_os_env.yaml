@@ -1,0 +1,144 @@
+# Example: Secure Research Agent with Labels, Policies, and a Real OS Environment
+#
+# This variant keeps the same policy design as `secure_research_agent.yaml`
+# but uses the built-in OS environment tools for shell and file actions.
+#
+# Use this example when you want to try the real `sys_os_shell` / `sys_os_write`
+# flow. If your host environment cannot support the helper sandbox cleanly,
+# prefer `secure_research_agent.yaml`, which uses deterministic fake tools.
+
+name: secure_research_assistant_os_env
+prompt: |
+  You are a research assistant that can search the web, read internal
+  confidential documents, and use the OS environment tools.
+
+  Be aware that your actions are governed by a security policy:
+  - Searching the web lowers your integrity level.
+  - Reading confidential documents raises your confidentiality level.
+  - Shell and file operations may be restricted based on your current labels,
+    which means you can still run them, but users will be asked to approve.
+  - Use `sys_os_shell` for command execution and `sys_os_write` for file output.
+
+labels:
+  confidentiality: "0"
+  integrity: "1"
+
+label_schema:
+  confidentiality:
+    values: ["0", "1"]
+  integrity:
+    values: ["0", "1"]
+
+ask_timeout: 30
+policy_transparency: true
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    # ``type: none`` keeps the example runnable on macOS / other
+    # non-Linux hosts. Flip back to ``type: linux_bwrap`` on
+    # Linux (and un-comment ``read_paths`` / ``write_paths`` below)
+    # to exercise the filesystem-level read/write restriction the
+    # example is really trying to demonstrate. ``type: none``
+    # rejects read_paths/write_paths so those must stay commented
+    # when the sandbox is off.
+    type: none
+    # type: linux_bwrap
+    # read_paths: ["/"]
+    # write_paths: ["/tmp"]
+
+executor:
+  model: databricks-claude-sonnet-4-6
+
+tools:
+  # NB: the tool is named ``search_web`` (not ``web_search``) because
+  # ``web_search`` is a reserved builtin tool name — declaring a local
+  # tool with that name fails spec validation. The sibling
+  # ``secure_research_agent.yaml`` uses ``search_web`` for the same reason.
+  search_web:
+    type: function
+    description: Search the web for public information.
+    callable: tests.resources.examples._shared.tool_functions.web_search
+
+  read_internal_doc:
+    type: function
+    description: Read an internal confidential document by ID.
+    callable: tests.resources.examples._shared.tool_functions.read_internal_doc
+
+policies:
+  taint_web_search:
+    type: function
+    on: [tool_call:search_web]
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: allow
+        set_labels: {integrity: "0"}
+        on_phases: [tool_call]
+        on_tools: [search_web]
+    set_labels: [integrity]
+
+  taint_confidential_read:
+    type: function
+    on: [tool_call:read_internal_doc]
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: allow
+        set_labels: {confidentiality: "1"}
+        on_phases: [tool_call]
+        on_tools: [read_internal_doc]
+    set_labels: [confidentiality]
+
+  deny_contaminated_os_actions:
+    type: function
+    on: [tool_call:sys_os_shell, tool_call:sys_os_write, tool_call:sys_os_edit]
+    condition:
+      confidentiality: "1"
+      integrity: "0"
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: deny
+        reason: |
+          Agent has both confidential data AND untrusted content.
+          OS shell and file operations are denied to prevent data exfiltration.
+        on_phases: [tool_call]
+        on_tools: [sys_os_shell, sys_os_write, sys_os_edit]
+
+  ask_high_confidentiality:
+    type: function
+    on: [tool_call:sys_os_shell]
+    condition:
+      confidentiality: "1"
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: ask
+        reason: |
+          Agent has accessed confidential data.
+          Shell command requires explicit user approval.
+        on_phases: [tool_call]
+        on_tools: [sys_os_shell]
+
+  ask_low_integrity:
+    type: function
+    on: [tool_call:sys_os_shell, tool_call:sys_os_write, tool_call:sys_os_edit]
+    condition:
+      integrity: "0"
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: ask
+        reason: |
+          Agent has consumed untrusted web content.
+          This action requires explicit user approval.
+        on_phases: [tool_call]
+        on_tools: [sys_os_shell, sys_os_write, sys_os_edit]
+
+  rate_limit:
+    type: function
+    handler: tests.resources.examples._shared.rate_limit_policy.max_tool_calls_per_turn
+    factory_params:
+      limit: 15

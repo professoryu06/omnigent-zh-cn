@@ -1,0 +1,94 @@
+name: secure-research
+description: |
+  Ported from omnigent `examples/secure_research_agent.yaml`.
+  Full IFC scenario — labels + function policies + enforcement.
+
+executor:
+  model: gpt-4o
+
+prompt: Test fixture for the IFC label / policy scenario.
+
+ask_timeout: 30
+
+labels:
+  confidentiality: "0"
+  integrity: "1"
+
+label_schema:
+  confidentiality:
+    values: ["0", "1"]
+  integrity:
+    values: ["0", "1"]
+
+policies:
+  taint_web_search:
+    type: function
+    on: [tool_call:web_search]
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: allow
+        set_labels: {integrity: "0"}
+        on_phases: [tool_call]
+        on_tools: [web_search]
+    set_labels: [integrity]
+
+  taint_confidential_read:
+    type: function
+    on: [tool_call:read_internal_doc]
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: allow
+        set_labels: {confidentiality: "1"}
+        on_phases: [tool_call]
+        on_tools: [read_internal_doc]
+    set_labels: [confidentiality]
+
+  deny_contaminated_shell:
+    type: function
+    on: [tool_call:run_shell, tool_call:write_file]
+    condition:
+      confidentiality: "1"
+      integrity: "0"
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: deny
+        reason: |
+          Agent has both confidential data AND untrusted content.
+          Shell and file operations are denied to prevent data
+          exfiltration via prompt injection.
+        on_phases: [tool_call]
+        on_tools: [run_shell, write_file]
+
+  ask_high_confidentiality:
+    type: function
+    on: [tool_call:run_shell]
+    condition:
+      confidentiality: "1"
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: ask
+        reason: |
+          Agent has accessed confidential data. Shell command
+          requires explicit user approval.
+        on_phases: [tool_call]
+        on_tools: [run_shell]
+
+  ask_low_integrity:
+    type: function
+    on: [tool_call:run_shell, tool_call:write_file]
+    condition:
+      integrity: "0"
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: ask
+        reason: |
+          Agent has consumed untrusted web content. This action
+          requires explicit user approval to mitigate potential
+          prompt-injection risks.
+        on_phases: [tool_call]
+        on_tools: [run_shell, write_file]

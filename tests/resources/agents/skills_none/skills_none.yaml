@@ -1,0 +1,24 @@
+# skills_none — fixture for skills_filter='none' (hermetic).
+#
+# Exercises the spec/runtime/harness pipeline that suppresses
+# every host-discovered Claude Code skill. The harness wrap
+# must produce ``ClaudeAgentOptions(skills=[], setting_sources=[])``
+# so the underlying CLI sees ``--setting-sources=`` (empty) and
+# does NOT walk ``~/.claude/skills/`` / ``<cwd>/.claude/skills/``.
+#
+# Used by tests/runtime/test_workflow.py::
+# test_skills_filter_pipeline_e2e. The original user-reported
+# regression was specifically this case — ``skills: none`` in
+# examples/hello_world.yaml had no effect on the live REPL
+# because the AP→harness env-var bridge dropped the field and
+# the harness wrap fell back to ``"all"``.
+name: skills_none_agent
+prompt: A simple agent for skills='none' pipeline tests.
+skills: none
+executor:
+  # ``harness: claude-sdk`` is required so the spec validates;
+  # the test loads the spec but does not actually spawn the
+  # harness subprocess (it patches ``ClaudeSDKExecutor.__init__``
+  # to capture the constructor kwargs).
+  harness: claude-sdk
+  model: databricks-claude-sonnet-4-6

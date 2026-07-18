@@ -1,0 +1,44 @@
+# Agent declaring spec-level client-runtime tools.
+#
+# A tool with ``runtime: client`` has no server-side ``callable:``;
+# the SDK consumer (REPL, frontend, custom client) supplies the
+# implementation at stream-start time. The server presents the
+# tool's schema to the LLM and emits an ``action_required`` event
+# when the LLM invokes it. The client executes, returns the
+# result, and the conversation continues.
+#
+# See ``omnigent/tools/client_specified/__init__.py`` for the
+# request-time client-tool concept this spec field unifies with.
+
+name: editor_agent
+prompt: |
+  You are a coding assistant.
+  Use ``open_in_editor`` to ask the user to open a file in their
+  editor when explaining code. Use ``search_web`` for fact lookups.
+
+executor:
+  model: databricks-claude-sonnet-4
+
+tools:
+  search_web:
+    type: function
+    # ``runtime: server`` is the default; written explicitly here
+    # so authors can see both knobs in one place.
+    runtime: server
+    description: "Search the web for a query and return the top results."
+    callable: tests.resources.examples._shared.tool_functions.web_search
+
+  open_in_editor:
+    type: function
+    runtime: client
+    description: "Open a file in the user's editor."
+    parameters:
+      type: object
+      properties:
+        path:
+          type: string
+          description: "Absolute or workspace-relative path to the file."
+      required: [path]
+    # No ``callable:`` — implemented by the SDK consumer at
+    # stream-start time. Declaring one here would be a validation
+    # error.

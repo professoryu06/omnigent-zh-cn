@@ -1,0 +1,72 @@
+# Demo for the built-in *session risk score* policy.
+#
+# The agent accrues a risk score as it acts, and once the score crosses a
+# threshold, sensitive actions (sending mail, sharing files) flip from ALLOW to
+# ASK so a human has to approve them.
+#
+# Risk comes from two independent sources — this demo drives the threshold using
+# the first one, which works with no special tool support:
+#   * each web_search adds 10 points (per-tool-call scoring via tool_points);
+#   * OPTIONALLY, reading a result annotated with a data-classification label
+#     adds points (sensitive_labels). This only fires if your MCP server tags
+#     its results with a classification field — many do not. It is shown here
+#     commented out; enable it and set the label values your server actually
+#     emits if you have one.
+#
+# The running score persists across turns via session_state, so a session that
+# has taken enough risky actions stays gated.
+#
+# Usage:
+#   export DATABRICKS_CONFIG_PROFILE=<your-profile>
+#   python -m omnigent tests/resources/examples/risk_score_agent.yaml \
+#       --prompt "Search the web for our competitors, then email a summary."
+#   # Five web searches raise the score to the threshold; the gmail_message_send
+#   # is then escalated to ASK.
+
+name: risk_score_agent
+prompt: |
+  You are a research assistant with web search and Google Workspace tools.
+  Use web_search to gather information and the Google tools to read or share
+  documents and email. If an action is blocked or requires approval, explain
+  that it was gated by the session risk policy.
+
+executor:
+  harness: openai-agents
+  model: databricks-gpt-5-4-mini
+  auth:
+    type: databricks
+    profile: oss
+
+tools:
+  # Point this at your Google MCP server. The risk policy matches tools by
+  # canonical name regardless of the server prefix (mcp__google__*, google__*,
+  # or bare), so no server-specific configuration is needed here. The
+  # OpenAI-model native web_search is also scored (see tool_points below) — the
+  # policy gates on the tool name whether or not it is declared in this block.
+  google:
+    type: mcp
+    command: npx
+    args: ["-y", "@your-org/google-mcp-server"]
+
+policies:
+  session_risk:
+    type: function
+    handler: omnigent.policies.builtins.risk_score.risk_score_policy
+    factory_params:
+      threshold: 50
+      # Each of these tool calls adds risk. This is the portable path: it needs
+      # no special support from any tool, so the demo drives the threshold here
+      # (5 x 10 = 50).
+      tool_points:
+        web_search: 10
+      # OPTIONAL: score results that carry a data-classification label. Only
+      # uncomment this if your MCP server annotates results with a classification
+      # field, and set the label values it actually emits. (There is no portable,
+      # cross-server classification field, so this is left off by default.)
+      # sensitive_labels:
+      #   confidential: 30
+      # Once the score reaches the threshold, these tools require approval.
+      guarded_tools:
+        - gmail_message_send
+        - drive_permission_create
+      escalate_action: ASK

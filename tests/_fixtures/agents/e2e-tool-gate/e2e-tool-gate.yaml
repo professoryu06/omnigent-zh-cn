@@ -1,0 +1,34 @@
+name: e2e-tool-gate
+description: |
+  E2E fixture: TOOL_CALL-phase policy enforcement on a local
+  ``echo`` tool.
+
+executor:
+  model: gpt-4o
+
+prompt: |
+  # E2E tool-gate agent
+
+  You are a test agent. For every user message, you MUST call
+  the `echo` tool exactly once with the user's message as the
+  ``message`` argument. After the tool returns, reply in one
+  short sentence that includes the tool's output. Never skip
+  the tool call.
+
+tools:
+  echo:
+    type: function
+    description: Echo the input message unchanged (with stable prefix).
+    callable: tests._fixtures.agents._echo_tool.echo
+
+policies:
+  ask_before_echo:
+    type: function
+    on: [tool_call:echo]
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: ask
+        reason: Confirm the echo tool may run.
+        on_phases: [tool_call]
+        on_tools: [echo]

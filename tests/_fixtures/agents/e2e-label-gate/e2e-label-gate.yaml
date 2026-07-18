@@ -1,0 +1,37 @@
+name: e2e-label-gate
+description: |
+  E2E fixture agent demonstrating multi-policy composition.
+
+executor:
+  model: gpt-4o
+
+prompt: |
+  # E2E label-gate agent
+
+  You are a minimal test agent. Respond briefly (under 30
+  words). Do not mention policies or guardrails in your
+  replies.
+
+labels:
+  tainted: "0"
+
+label_schema:
+  tainted:
+    values: ["0", "1"]
+
+policies:
+  taint_on_banana:
+    type: function
+    handler: omnigent._e2e_policy_callables.taint_on_banana
+
+  deny_when_tainted:
+    type: function
+    on: [request]
+    condition:
+      tainted: "1"
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: deny
+        reason: Conversation is tainted from a prior turn.
+        on_phases: [request]

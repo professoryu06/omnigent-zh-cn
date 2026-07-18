@@ -1,0 +1,19 @@
+# Codex skills e2e fixture — `skills: none`.
+#
+# Same bundle layout as `codex_skills_all` (two SKILL.md files
+# under `skills/`). Tests that `skills: none` causes the executor
+# to leave `$CODEX_HOME/skills/` ABSENT, so codex's auto-discovery
+# walks no skills — neither bundled nor host-installed.
+#
+# Used by `tests/e2e/test_codex_skills_filter_e2e.py`.
+name: codex_skills_none_agent
+prompt: |
+  You are a tester agent. When asked to list your skills, output
+  every skill name you can see in your environment, exactly as the
+  names appear, one per line. Do not abbreviate. Do not paraphrase.
+  Do not invent skills you don't see. If you have no skills
+  available, output the literal string `NO_SKILLS_LOADED`.
+skills: none
+executor:
+  harness: codex
+  model: databricks-gpt-5-4-mini

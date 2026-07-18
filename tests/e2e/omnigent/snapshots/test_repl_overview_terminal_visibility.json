@@ -1,0 +1,6 @@
+{
+    "exit_code": {"kind": "exact", "value": 0},
+    "terminal_label_present": {"kind": "exact", "value": true},
+    "tmux_socket_flag_rendered": {"kind": "exact", "value": true},
+    "attach_verb_rendered": {"kind": "exact", "value": true}
+}

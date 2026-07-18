@@ -1,0 +1,32 @@
+name: Linux and WSL2 installation smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths-ignore: ['docs/**']
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install native prerequisites
+        run: sudo apt-get update && sudo apt-get install -y tmux bubblewrap
+      - name: Run Chinese installer
+        run: sh scripts/install-zh.sh
+      - name: Verify installed CLI
+        run: |
+          omnigent-zh platform-info --json
+          omnigent-zh --help

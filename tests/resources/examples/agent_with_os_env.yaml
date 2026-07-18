@@ -1,0 +1,36 @@
+# Agent with os_env — demonstrates the built-in Pi-like OS tools.
+#
+# Usage:
+#   python -m omnigent examples/agent_with_os_env.yaml \
+#       --prompt "Use sys_os_write to create hello.txt with 'hello', then sys_os_read it back."
+#
+#   python -m omnigent examples/agent_with_os_env.yaml \
+#       --prompt "Use sys_os_shell to run 'pwd' and tell me the current working directory."
+#
+# Notes:
+# - This config uses the default Linux sandbox for `caller_process`.
+# - On macOS or other non-Linux systems, change `sandbox.type` to `none`.
+
+name: assistant_with_os_env
+prompt: |
+  You are a helpful assistant with access to a small operating-system environment.
+  Use the built-in `sys_os_read`, `sys_os_write`, `sys_os_edit`, and `sys_os_shell`
+  tools when the user asks you to inspect files, modify files, or run commands.
+  Prefer `sys_os_read`, `sys_os_write`, and `sys_os_edit` for text files.
+  Use `sys_os_shell` for command execution.
+
+executor:
+  model: databricks-gpt-5-4-mini
+  profile: test-profile
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    # Use ``type: none`` so the example runs on macOS / other non-
+    # Linux hosts. For real sandbox enforcement, flip to
+    # ``type: linux_bwrap`` — see the original Linux-sandbox
+    # variant in ``agent_with_os_env_fork`` or enable it manually.
+    type: none
+    # type: linux_bwrap
+    allow_network: true

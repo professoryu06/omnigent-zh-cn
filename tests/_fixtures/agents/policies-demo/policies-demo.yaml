@@ -1,0 +1,45 @@
+name: policies-demo
+description: |
+  Ported from omnigent `examples/agent_with_policies.yaml`.
+  Demonstrates FunctionPolicy (block long sleep) + taint-on-web
+  composition.
+
+executor:
+  model: gpt-4o
+
+prompt: Test fixture for policy composition.
+
+labels:
+  integrity: "1"
+
+policies:
+  block_long_sleep:
+    type: function
+    handler: tests._fixtures.agents.policies_demo_policies.block_long_sleep
+
+  taint_web:
+    type: function
+    on: [tool_call:web_search]
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: allow
+        set_labels: {integrity: "0"}
+        on_phases: [tool_call]
+        on_tools: [web_search]
+    set_labels: [integrity]
+
+  confirm_shell_after_taint:
+    type: function
+    on: [tool_call:run_shell]
+    condition:
+      integrity: "0"
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: ask
+        reason: |
+          Untrusted web content was consumed; shell commands require
+          explicit approval.
+        on_phases: [tool_call]
+        on_tools: [run_shell]

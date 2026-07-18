@@ -1,0 +1,50 @@
+# Render blueprint: web service (pulls the CI image — it ships the gitignored
+# web UI bundle a source build can't) + managed Postgres + data disk.
+# Defaults to built-in `accounts` auth (multi-user, no IdP). Full walkthrough:
+# deploy/render/README.md.
+
+services:
+  - type: web
+    name: omnigent
+    runtime: image
+    image:
+      url: ghcr.io/omnigent-ai/omnigent-server:latest
+      # While the package is private, add image.creds.fromRegistryCreds (a GHCR
+      # read:packages token registered in the Render dashboard). Drop once public.
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: artifact-data
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: omnigent-db
+          property: connectionString
+      - key: ARTIFACT_DIR
+        value: /data/artifacts
+      # Keep the first-boot admin password on the disk across redeploys.
+      - key: OMNIGENT_ADMIN_CREDENTIALS_PATH
+        value: /data/admin-credentials
+      - key: HOST
+        value: 0.0.0.0
+      - key: OMNIGENT_AUTH_PROVIDER
+        value: accounts
+      - key: OMNIGENT_ACCOUNTS_AUTO_OPEN
+        value: "0"
+      # No COOKIE_SECRET or BASE_URL here: the entrypoint mints a hex cookie
+      # secret on the disk and auto-detects the public URL from RENDER_EXTERNAL_URL.
+      # (Render's generateValue isn't hex, which the server's bytes.fromhex rejects.)
+      # So this blueprint deploys with zero prompts — true 1-click.
+      #
+      # To use your own IdP instead of built-in accounts, set
+      # OMNIGENT_AUTH_PROVIDER=oidc and add the OMNIGENT_OIDC_* vars
+      # (including OMNIGENT_OIDC_COOKIE_SECRET = `openssl rand -hex 32`) in the
+      # Render dashboard. See deploy/render/README.md.
+
+databases:
+  - name: omnigent-db
+    plan: basic-256mb
+    databaseName: omnigent
+    user: omnigent

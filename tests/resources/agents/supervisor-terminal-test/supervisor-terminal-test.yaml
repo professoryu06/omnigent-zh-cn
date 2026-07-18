@@ -1,0 +1,62 @@
+# supervisor-terminal-test agent — exercises the REPL's
+# inferred terminal-supervision sidebar.
+#
+# Per ``designs/OMNIGENT_TERMINAL_BRIDGE.md`` §3 (non-goals):
+# inline ``tools.<name>.type: agent`` sub-agents do NOT own
+# terminals — the parent agent declares ``terminals:`` and
+# the LLM launches them as it spawns workers. This test
+# verifies that the REPL's Ctrl+O sidebar shows BOTH the
+# parent's terminals AND any spawned sub-agents, which is the
+# headline supervision UX.
+#
+# Used by ``tests/e2e/test_repl_terminal_overview_e2e.py``.
+
+name: supervisor-terminal-test
+prompt: |
+  You supervise a ``worker`` sub-agent and own a ``bash``
+  terminal. The user will ask you to:
+
+  1. Launch your bash terminal (use ``sys_terminal_launch``
+     with the session key the user specifies).
+  2. Delegate a terminal task to the ``worker`` sub-agent via
+     ``sys_session_send`` (session ``alpha``) — the worker
+     INHERITS your terminal config and can call
+     ``sys_terminal_launch`` itself. Use ``sys_read_inbox`` to
+     wait for the worker's reply.
+
+  Keep replies short. Don't read or send into the terminal
+  unless the user asks.
+
+executor:
+  model: databricks-claude-sonnet-4-6
+  harness: claude-sdk
+  profile: test-profile
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none
+
+terminals:
+  bash:
+    command: bash
+    os_env:
+      type: caller_process
+      sandbox:
+        type: none
+
+tools:
+  worker:
+    type: agent
+    description: "A worker sub-agent. Can launch its own bash terminal via sys_terminal_launch."
+    prompt: |
+      You are a worker. When asked to launch a terminal, call
+      ``sys_terminal_launch`` with the terminal name and
+      session key the user specified — the parent inherits its
+      terminal config to you, so ``bash`` is available. Reply
+      with one short line summarizing what you did.
+    executor:
+      model: databricks-claude-sonnet-4-6
+      harness: claude-sdk
+      profile: test-profile

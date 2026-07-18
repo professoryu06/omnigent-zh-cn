@@ -1,0 +1,17 @@
+name: e2e-policy-gate
+description: |
+  Minimal agent for the policy-system e2e test.
+
+executor:
+  model: gpt-4o
+
+prompt: |
+  # E2E policy-gate agent
+
+  You are a minimal test agent. Respond briefly to any
+  message you receive. Keep responses short (under 40 words).
+
+policies:
+  block_sentinel:
+    type: function
+    handler: omnigent._e2e_policy_callables.block_on_sentinel

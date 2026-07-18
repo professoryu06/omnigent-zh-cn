@@ -1,0 +1,212 @@
+# Agent with os_env using the linux_bwrap sandbox — opt-in hardened
+# variant of examples/agent_with_os_env.yaml.
+#
+# What this example demonstrates:
+#   - Spawn-time isolation via the bubblewrap (``bwrap``) launcher: the
+#     helper subprocess runs in a fresh mount + PID + UTS + IPC
+#     namespace with a minimal hermetic root.
+#   - Read-only cwd by default. The agent can ``sys_os_read`` files
+#     under cwd but every ``sys_os_write`` / ``sys_os_edit`` /
+#     redirect-via-shell attempt is rejected.
+#   - Dotfiles / dotdirs anywhere under cwd are masked recursively.
+#     ``.env``, ``.git/``, ``.aws/``, ``.ssh/``, ``services/api/.env``,
+#     etc. are all invisible inside the sandbox. The default allowlist
+#     passes through ``.venv`` (matched by basename, so nested venvs
+#     work too); extend it with ``cwd_allow_hidden:`` (see below)
+#     for ``.git``, ``.gitignore``, etc.
+#     The recursive scan is bounded by
+#     ``cwd_hidden_scan_max_entries`` (default 50000); behavior at
+#     the cap is controlled by ``cwd_hidden_scan_overflow``.
+#   - A pre-generated writable scratch directory mounted as
+#     ``$TMPDIR``. Use this for any artifact the agent needs to
+#     produce while keeping the real cwd untouched.
+#   - Hardened seccomp profile applied inside the helper after the
+#     namespaces are set up: blocks ``unshare`` / ``setns`` / ``clone``
+#     with ``CLONE_NEW*`` flags and ``clone3`` outright (no nested
+#     namespace escapes), plus a socket-family allowlist that only
+#     permits ``AF_UNIX`` / ``AF_INET`` / ``AF_INET6`` — every other
+#     family (present and future) is denied. The seccomp filter covers the native
+#     ABI plus the i386 and x32 compat ABIs on x86_64 (and 32-bit ARM
+#     compat on aarch64), so ``int $0x80`` syscalls are gated by the
+#     same rules as native syscalls.
+#   - Environment-variable allowlist. The parent's full shell env
+#     (which typically holds ``AWS_ACCESS_KEY_ID``, ``GITHUB_TOKEN``,
+#     ``OPENAI_API_KEY``, ``SSH_AUTH_SOCK`` and friends) is filtered
+#     down to a minimal default (``PATH``, ``HOME``, ``USER``, locale,
+#     terminal info, Python interpreter knobs); anything else has to
+#     be opted in per spec via ``env_passthrough`` (see below). This
+#     prevents ``sys_os_shell("env")`` from enumerating every secret.
+#
+# Requirements:
+#   - Linux host with ``bwrap`` installed (``apt install bubblewrap``
+#     or ``dnf install bubblewrap``). The spec resolver hard-errors at
+#     spec-load time on non-Linux or when ``bwrap`` is missing — there
+#     is no silent fallback.
+#   - The Linux platform default sandbox is ``linux_bwrap`` when
+#     ``bwrap`` is on ``PATH``; this YAML pins it explicitly via
+#     ``sandbox.type: linux_bwrap`` for clarity.
+#
+# Usage:
+#   # Read-only cwd should let the agent inspect this repo but reject
+#   # any write attempt:
+#   uv run omnigent examples/agent_with_os_env_bwrap.yaml \
+#       --profile <profile> \
+#       --prompt "List files in cwd with ls -la, then try to write 'x' to a file named blocked.txt and report what happens."
+#
+#   # Dotfile masking smoke test — even with shell access the agent
+#   # cannot read host secrets that live behind dotfiles:
+#   uv run omnigent examples/agent_with_os_env_bwrap.yaml \
+#       --profile <profile> \
+#       --prompt "Try to cat .env, .git/config, and ~/.aws/credentials. Report exactly what each command prints."
+#
+#   # Writable scratch tmpdir — the agent can build artifacts under
+#   # $TMPDIR even though cwd is read-only:
+#   uv run omnigent examples/agent_with_os_env_bwrap.yaml \
+#       --profile <profile> \
+#       --prompt "Use sys_os_shell to write 'hello' to \$TMPDIR/note.txt, then read it back."
+#
+#   # Seccomp smoke test — nested namespaces are blocked:
+#   uv run omnigent examples/agent_with_os_env_bwrap.yaml \
+#       --profile <profile> \
+#       --prompt "Run python3 -c \"import ctypes,os; libc=ctypes.CDLL(None,use_errno=True); rc=libc.unshare(0x10000000); print(rc, os.strerror(ctypes.get_errno()))\" and report the output."
+#
+# Notes:
+#   - Flip `allow_network: true` to `false` to add `--unshare-net`
+#     so the helper sees only the loopback interface.
+#   - Make cwd writable by setting `write_paths: [.]` (commented
+#     out below) -- useful for "edit the project in place" workflows.
+#     Combine with `fork: true` for copy-on-write isolation if you
+#     want the agent to experiment without touching the original
+#     files (see `examples/agent_with_os_env_fork.yaml`).
+#   - Set `start_in_scratch: true` (top-level under `os_env`) to boot
+#     the helper inside the writable `$TMPDIR` instead of the
+#     workspace cwd. Relative writes via the shell tool (e.g.
+#     `echo hi > out.txt`) then naturally land in scratch without the
+#     agent having to remember to prefix every path with `$TMPDIR`.
+#     The workspace stays bound read-only at its original absolute
+#     path so the agent can still read project files. Mutually
+#     exclusive with `fork` (which already creates a writable
+#     copy-on-write workspace).
+
+name: assistant_with_os_env_bwrap
+prompt: |
+  You are a helpful assistant running inside a hardened Linux sandbox.
+  You have access to the built-in `sys_os_read`, `sys_os_write`,
+  `sys_os_edit`, and `sys_os_shell` tools.
+
+  The current working directory is read-only by default. Use
+  `$TMPDIR` (a per-session writable scratch directory) for any files
+  you need to create. Top-level dotfiles in the cwd are hidden by the
+  sandbox — if a tool reports that `.env` or `.git/config` does not
+  exist, that is the sandbox masking it, not a real absence.
+
+executor:
+  model: databricks-gpt-5-4-mini
+  profile: test-profile
+
+os_env:
+  type: caller_process
+  cwd: .
+
+  # Optional: boot the helper subprocess inside the writable scratch
+  # tmpdir instead of cwd. Useful when the agent's natural pattern is
+  # to write artifacts to the current directory ("./out.txt", "make
+  # build", etc.) -- the workspace stays read-only and bound at its
+  # original absolute path for reads, while every relative-path write
+  # lands in the disposable scratch dir. Mutually exclusive with
+  # `fork`. Default false (helper boots in cwd).
+  # start_in_scratch: true
+
+  sandbox:
+    type: linux_bwrap
+
+    # Optional: allow specific dotfile / dotdir basenames through the
+    # recursive cwd dotfile mask. Default is [".venv"] so common
+    # Python project layouts keep working. Matching is by basename at
+    # any depth — ``.venv`` here exempts both ``cwd/.venv`` and
+    # ``cwd/services/api/.venv``. Add ".git" if the agent needs
+    # ``git status`` / ``git log``; add ".gitignore" if it needs to
+    # respect ignore rules. Entries must be plain names — no ``/``,
+    # no ``..``, no absolute paths (validated at spec parse time).
+    # cwd_allow_hidden: [".venv", ".git", ".gitignore"]
+
+    # Optional: cap on the number of filesystem entries the recursive
+    # dotfile walker visits under cwd. The walker prunes at masked
+    # dot-directories so realistic projects fit well under the
+    # default; non-dot dirs that happen to be huge (``node_modules``,
+    # ``target``, ``dist``) DO count toward the cap. ``node_modules``
+    # is walked LAST so the budget masks the project's own dotfiles
+    # first. Default 50000 is enough for most repos.
+    # cwd_hidden_scan_max_entries: 100000
+
+    # Optional: what to do when ``cwd_hidden_scan_max_entries`` is
+    # reached. One of:
+    # - "warn" (default): emit a logging warning naming the
+    #   unfinished directories, stop scanning, and use the partial
+    #   mask. Dotfiles past the cap remain visible — acceptable for a
+    #   trusted workspace where blocking every spawn (common with
+    #   ``node_modules``) is worse than a best-effort mask.
+    # - "error": fail at spawn time with an actionable message naming
+    #   both spec keys. Fail-Loud — use for untrusted source trees.
+    # - "unlimited": ignore the cap and scan the full tree. O(N) on
+    #   total entries; safe but can be slow on huge monorepos.
+    # cwd_hidden_scan_overflow: error
+
+    # Optional: make cwd writable. Default is read-only — the agent
+    # can read but every write attempt fails. Uncomment to let the
+    # agent edit the project in place. The scratch ``$TMPDIR`` is
+    # always writable regardless of this setting.
+    # write_paths: ["."]
+
+    # Optional: extra read-only mounts visible to the helper. Useful
+    # for letting the agent reference docs / fixtures that live
+    # outside cwd without granting write access.
+    # read_paths:
+    #   - /opt/some/reference/data
+
+    # Optional: extra environment variables the helper subprocess is
+    # allowed to inherit beyond the always-passed default
+    # (PATH/HOME/USER/SHELL/LANG/LC_*/PWD/TERM/TZ + Python interpreter
+    # knobs). The parent's full env is otherwise stripped before spawn,
+    # so credentials like AWS_ACCESS_KEY_ID, GITHUB_TOKEN,
+    # OPENAI_API_KEY, ANTHROPIC_API_KEY, KUBECONFIG, VAULT_TOKEN,
+    # SSH_AUTH_SOCK, GOOGLE_APPLICATION_CREDENTIALS etc. are NOT
+    # visible to the agent unless explicitly listed here. Each entry
+    # must be a POSIX env var name ([A-Za-z_][A-Za-z0-9_]*).
+    # env_passthrough:
+    #   - AWS_PROFILE
+    #   - GITHUB_TOKEN
+
+    # Network access. Set to ``false`` to add ``--unshare-net`` and
+    # remove all interfaces except loopback. The seccomp profile
+    # only allows AF_UNIX/AF_INET/AF_INET6 regardless of this flag.
+    allow_network: true
+
+    # Optional: L7 egress policy — fine-grained HTTP(S) request
+    # filtering with TLS interception and hard enforcement.
+    #
+    # When set, a MITM proxy is started and the helper runs in an
+    # isolated network namespace (``--unshare-net``) where the ONLY
+    # egress path is through the proxy. Programs that bypass
+    # HTTP_PROXY and attempt direct TCP connections get "Network is
+    # unreachable" — no iptables or external tooling required.
+    #
+    # Rule DSL: ``METHODS host/path/pattern``
+    # - Methods: comma-separated HTTP verbs, or ``*`` for any.
+    # - Host: exact match, or ``*.domain`` for wildcard subdomains.
+    # - Path: glob — ``*`` matches one segment, ``**`` any depth.
+    # - Default deny: requests not matching any rule get HTTP 403.
+    #
+    # Requires ``type: linux_bwrap`` (rejected at parse time for
+    # other backends). The ``allow_network`` flag is implicitly
+    # overridden when egress_rules is set (the network namespace is
+    # always isolated; only proxy-approved traffic reaches the
+    # internet).
+    #
+    # egress_rules:
+    #   - "GET api.github.com/repos/myorg/**"
+    #   - "GET,POST pypi.org/**"
+    #   - "* *.amazonaws.com/**"
+    egress_rules:
+      - "GET httpbin.org/get"
+      - "GET httpbin.org/status/*"

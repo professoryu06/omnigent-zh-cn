@@ -1,0 +1,27 @@
+name: e2e-prompt-policy
+description: |
+  E2E fixture: prompt_policy builtin with the real LLM-backed
+  classifier.
+
+executor:
+  model: gpt-4o
+
+prompt: |
+  # E2E prompt-policy agent
+
+  You are a tiny test agent. Reply briefly (under 20 words).
+  Plain text only. Do not mention policies or guardrails.
+
+policies:
+  deny_canada:
+    type: function
+    function:
+      path: omnigent.policies.builtins.prompt.prompt_policy
+      arguments:
+        prompt: |
+          You are a strict content filter. Look at the user's
+          message and decide:
+          - If it mentions Canada, Canadian, Ontario, Quebec,
+            Toronto, Montreal, or anything unambiguously Canadian,
+            deny the request.
+          - Otherwise allow.

@@ -1,0 +1,64 @@
+# Inbox-test agent — minimal manual REPL fixture for
+# ``sys_call_async`` + ``sys_read_inbox`` on the harness path.
+#
+# The LLM dispatches the bundled ``tag_label`` tool via
+# ``sys_call_async``; the dispatched task's result lands on the
+# parent's async-work inbox, and a subsequent ``sys_read_inbox``
+# call drains the queued payload inline. The marker
+# ``INBOX_TEST_TAG[<label>]`` should appear in the drain output.
+#
+# Usage:
+#   .venv/bin/python -m omnigent \
+#     tests/resources/agents/inbox_test/inbox_test.yaml \
+#     --profile <your-profile>
+#
+# Try:
+#   1) Dispatch tag_label with label='alpha' via sys_call_async
+#      and tell me the handle id.
+#   2) Now call sys_read_inbox once and tell me what it returned
+#      verbatim.
+#
+# The first turn returns the handle JSON immediately. The second
+# turn's ``sys_read_inbox`` drain should report a [System: task ...
+# completed] block containing INBOX_TEST_TAG[alpha].
+#
+# Companion fixture ``timer-test`` exercises the parallel timer
+# path, where firings persist directly to conversation history
+# (NOT via the topic). The two fixtures together cover both
+# routes.
+
+name: inbox-test
+prompt: |
+  You are an inbox-test assistant. You have one local tool,
+  ``tag_label(label: str)``, plus the Omnigent system tools
+  ``sys_call_async``, ``sys_read_inbox``, and
+  ``sys_cancel_async``.
+
+  When the user asks you to dispatch ``tag_label``, call it via
+  ``sys_call_async`` (target ``tool="tag_label"``, args a
+  JSON-encoded string like ``'{"label": "alpha"}'``). The handle
+  the call returns is NOT the tool's real output — just the
+  promise that the dispatch started.
+
+  When the user asks you to drain the inbox, call
+  ``sys_read_inbox`` (no arguments). The return value is either
+  the literal sentinel ``"Inbox is empty — no completed
+  tasks."`` or one or more ``[System: task ... completed]``
+  blocks. Quote the literal text verbatim — do not paraphrase.
+
+executor:
+  harness: claude-sdk
+  model: databricks-claude-sonnet-4-6
+  profile: test-profile
+
+async: true
+
+tools:
+  tag_label:
+    type: function
+    description: |
+      Wrap the supplied label in the literal marker
+      ``INBOX_TEST_TAG[<label>]``. Dispatch via sys_call_async to
+      land the result on the parent workflow's async_work_complete
+      mailbox.
+    callable: tests.resources.agents.inbox_test.tool_functions.tag_label

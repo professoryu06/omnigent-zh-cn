@@ -1,0 +1,67 @@
+# Minimal demo for tool-call and output policies.
+#
+# Usage:
+#   export DATABRICKS_CONFIG_PROFILE=<your-profile>
+#
+#   # MCP tool — allowed
+#   python -m omnigent tests/resources/examples/agent_with_policies.yaml \
+#       --prompt "Use the sleep tool to sleep for 2 seconds."
+#
+#   # MCP tool — blocked tool call
+#   python -m omnigent tests/resources/examples/agent_with_policies.yaml \
+#       --prompt "Use the sleep tool to sleep for 8 seconds."
+#
+#   # type:function tool — allowed
+#   python -m omnigent tests/resources/examples/agent_with_policies.yaml \
+#       --prompt "Calculate 6 * 7."
+#
+#   # type:function tool — blocked tool call
+#   python -m omnigent tests/resources/examples/agent_with_policies.yaml \
+#       --prompt "Calculate 10 / 2."
+#
+#   # Blocked output
+#   python -m omnigent tests/resources/examples/agent_with_policies.yaml \
+#       --prompt "What are the biggest countries in North America?"
+
+name: agent_with_policies
+prompt: |
+  You have a sleep tool (MCP) and a calculate tool (function).
+  If the user asks you to sleep, use the sleep tool exactly once.
+  If the user asks you to calculate, use the calculate tool exactly once.
+  If a tool is blocked, explain that the request was blocked by policy.
+
+executor:
+  harness: openai-agents
+  model: databricks-gpt-5-4-mini
+  auth:
+    type: databricks
+    profile: oss
+
+tools:
+  sleep-server:
+    type: mcp
+    command: .venv/bin/python
+    args: [-m, tests.resources.examples._shared.sleep_mcp_server]
+    description: "Exposes a sleep tool for policy-demo testing."
+
+  calculate:
+    type: function
+    description: "Safely evaluate a basic arithmetic expression and return the result."
+    callable: tests.resources.examples._shared.tool_functions.calculate
+
+policies:
+  block_long_sleep:
+    type: function
+    handler: tests.resources.examples._shared.tool_functions.block_long_sleep
+
+  block_division:
+    type: function
+    handler: tests.resources.examples._shared.tool_functions.block_division
+
+  block_canada_input:
+    type: function
+    handler: tests.resources.examples._shared.tool_functions.block_canada_input
+
+  block_canada_output:
+    type: function
+    handler: tests.resources.examples._shared.tool_functions.block_canada_output

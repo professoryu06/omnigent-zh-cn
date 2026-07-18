@@ -1,0 +1,23 @@
+# Caddy config for the docker-compose.https.yaml overlay.
+#
+# Caddy auto-provisions a Let's Encrypt cert for {$OMNIGENT_DOMAIN}
+# (HTTP-01 challenge) and reverse-proxies to the omnigent service
+# over the internal docker network — the omnigent container is no
+# longer directly exposed to the host.
+#
+# No ACME email is required: Let's Encrypt allows anonymous account
+# registration, so the cert issues without one. If you WANT expiry /
+# renewal notices, add a global email option above the site block:
+#
+#   {
+#       email you@example.com
+#   }
+#
+# (Earlier versions had `{ email {$OMNIGENT_ACME_EMAIL} }` here, which
+# hard-failed at startup when the var was unset — `email` with no
+# argument is a Caddyfile parse error. Omitting the block avoids that.)
+
+{$OMNIGENT_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy omnigent:8000
+}

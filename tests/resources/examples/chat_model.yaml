@@ -1,0 +1,18 @@
+name: chat-model
+prompt: |
+  You are a helpful assistant. Answer clearly and concisely.
+
+executor:
+  model: databricks-claude-sonnet-4-6
+
+labels:
+  integrity: "1"
+  confidentiality: "0"
+
+label_schema:
+  integrity:
+    values: ["0", "1"]
+  confidentiality:
+    values: ["0", "1"]
+
+ask_timeout: 30

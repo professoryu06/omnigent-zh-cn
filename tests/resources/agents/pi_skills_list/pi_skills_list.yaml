@@ -1,0 +1,20 @@
+# Pi skills e2e fixture — `skills: [<one-name>]`.
+#
+# Same bundle layout as the other pi_skills_* fixtures (two
+# SKILL.md files under `skills/`), but the spec only allow-lists
+# one of them. Tests that named-list filtering exposes the named
+# skill while suppressing the other — the most surgical proof
+# the resolver's per-name filter works.
+#
+# Used by `tests/e2e/test_pi_skills_filter_e2e.py`.
+name: pi_skills_list_agent
+prompt: |
+  You are a tester agent. When asked to list your skills, output
+  every skill name you can see in your environment, exactly as the
+  names appear, one per line. Do not abbreviate. Do not paraphrase.
+  Do not invent skills you don't see.
+skills:
+  - pi-e2e-xyz-greet-c4a8d5
+executor:
+  harness: pi
+  model: databricks-claude-sonnet-4-6

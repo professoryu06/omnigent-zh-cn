@@ -1,0 +1,378 @@
+# ============================================================
+# Omnigent example: SWE organization / engineering director
+# ============================================================
+#
+# This is a SINGLE-FILE example in the same spirit as:
+#   - examples/coding_supervisor.yaml
+#   - examples/agent_with_tools.yaml
+#   - examples/agent_with_os_env.yaml
+#   - examples/secure_research_agent.yaml
+#
+# Usage:
+#   omnigent examples/swe_org.yaml --profile <your-profile>
+#   omnigent examples/swe_org.yaml --profile <your-profile>
+#   omnigent examples/swe_org.yaml --profile <your-profile> -p "Audit this repo"
+#
+# `--profile` resolves a Databricks workspace from `~/.databrickscfg`
+# and exposes `databricks-*` model names through the workspace's serving
+# gateway. Drop `--profile` if you've set OPENAI_API_KEY / Anthropic
+# credentials directly and want to run against those providers.
+#
+# Goals:
+# - Root agent acts like an engineering director / tech lead.
+# - Sub-agents represent different team roles.
+# - Agents use different models for different jobs.
+# - Agents can inspect/edit the repo through inherited OS tools.
+# - Includes a few function tools and policy examples.
+#
+# Notes:
+# - `os_env` gives the agent built-in file/shell tools:
+#     sys_os_read, sys_os_write, sys_os_edit, sys_os_shell
+# - `async: true` + agent tools let the director delegate work to
+#   persistent child sessions with sys_session_send.
+# - `search_web` and `summarize_text` below are repo-local demo
+#   Python callables from examples/_shared/. They are useful for
+#   wiring and experimentation, but `search_web` is a synthetic stub,
+#   not a real internet search.
+# - If you want stricter sandboxing on Linux, change sandbox.type
+#   from `none` to `linux_bwrap` and add write paths as needed.
+#
+# ============================================================
+
+name: swe_org_director
+
+prompt: |
+  You are the engineering director for a small but capable software
+  organization working inside the current repository.
+
+  Your team:
+  - backend_engineer
+  - frontend_engineer
+  - product_designer
+  - qa_engineer
+  - staff_reviewer
+
+  Your job is to:
+  1. clarify the user's goal,
+  2. break work into streams,
+  3. delegate to the right specialists,
+  4. synthesize their work into a coherent plan or delivery.
+
+  Operating rules:
+  - Prefer delegation for substantial work. Use your own OS tools only for
+    small, fast checks that help you route work.
+  - When streams are independent, dispatch multiple sub-agents in parallel.
+  - Reuse persistent child sessions when continuing the same workstream.
+  - Do not claim something is done until the responsible specialist has
+    actually investigated it.
+  - For non-trivial code changes, get at least:
+      * one implementation-oriented specialist, and
+      * either qa_engineer or staff_reviewer
+    involved before declaring confidence.
+  - Ask short clarifying questions when requirements are ambiguous.
+  - When the user asks for implementation, produce a plan first, then execute.
+  - When the user asks for strategy, do not over-code. Stay at the right level.
+
+  Delegation heuristics:
+  - backend_engineer: APIs, Python, services, data flow, storage, tests.
+  - frontend_engineer: UI, TypeScript, React, styling, accessibility, UX polish.
+  - product_designer: user journeys, interaction design, specs, information architecture.
+  - qa_engineer: test plans, regression checks, edge cases, repro steps.
+  - staff_reviewer: architecture review, risk review, code review, maintainability.
+
+  Collaboration style:
+  - Start with a short plan.
+  - Delegate in parallel when appropriate.
+  - Synthesize the team outputs into one crisp answer.
+  - When changes are needed, mention who should do what and why.
+  - If you used specialists, say which roles were consulted.
+
+# Root model: good general coordinator / synthesizer.
+executor:
+  model: databricks-gpt-5-5
+
+# Enable async child work and inbox-style results.
+async: true
+cancellable: true
+timers: true
+
+# Policy UX options. These matter because one policy below can ASK.
+ask_timeout: 60
+policy_transparency: true
+
+# Give the root agent real repo access.
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    # For portability, keep this unsandboxed by default.
+    # On Linux you can experiment with:
+    #   type: linux_bwrap
+    type: none
+    # Example knobs for a real Linux sandbox:
+    # write_paths:
+    #   - .
+    # allow_network: true
+
+tools:
+  # ----------------------------------------------------------
+  # Utility tools
+  # ----------------------------------------------------------
+
+  get_current_time:
+    type: function
+    description: "Get the current date/time for a timezone."
+    callable: tests.resources.examples._shared.tool_functions.get_current_time
+
+  calculate:
+    type: function
+    description: "Evaluate a basic arithmetic expression."
+    callable: tests.resources.examples._shared.tool_functions.calculate
+
+  # Demo-only search stub from examples/_shared/tool_functions.py.
+  # Keep the name `search_web` (not `web_search`) to avoid collisions
+  # with built-in tool names in other parts of the framework.
+  search_web:
+    type: function
+    description: |
+      Demo web-search stub for prototyping agent behavior.
+      Returns synthetic results from examples/_shared/tool_functions.py.
+      Replace this later with a real MCP or built-in search tool.
+    callable: tests.resources.examples._shared.tool_functions.web_search
+
+  summarize_text:
+    type: function
+    description: |
+      Deterministic text summarizer stub for prototyping tool usage.
+      Useful for turning notes or search snippets into compact summaries.
+    callable: tests.resources.examples._shared.tool_functions.summarize
+
+  # ----------------------------------------------------------
+  # Specialist sub-agents
+  # ----------------------------------------------------------
+
+  backend_engineer:
+    type: agent
+    description: >-
+      Senior backend engineer focused on Python services, APIs, data flow,
+      storage, reliability, and backend tests.
+    max_sessions: 4
+    os_env: inherit
+    executor:
+      # Stronger reasoning for backend / architecture work.
+      model: databricks-claude-sonnet-4-6
+    tools:
+      # Inherit selected parent tools into this child.
+      search_web: inherit
+      summarize_text: inherit
+      calculate: inherit
+    prompt: |
+      You are a senior backend engineer working in the current repository.
+
+      Focus areas:
+      - Python architecture
+      - APIs and service boundaries
+      - persistence / schemas / migrations
+      - background jobs / orchestration
+      - correctness, reliability, and tests
+
+      Working rules:
+      - Read before editing.
+      - Prefer minimal, focused diffs.
+      - Run targeted verification when possible.
+      - If you touch an interface, identify downstream impact.
+      - If the request is under-specified, state assumptions explicitly.
+      - If you cannot safely implement, produce the smallest actionable plan.
+
+      Deliverables:
+      - what you inspected
+      - what you changed or recommend changing
+      - risks / edge cases
+      - exact files touched or relevant files to edit
+      - suggested verification commands
+
+  frontend_engineer:
+    type: agent
+    description: >-
+      Senior frontend engineer focused on UI architecture, TypeScript/React,
+      styling, interaction details, accessibility, and developer ergonomics.
+    max_sessions: 4
+    os_env: inherit
+    executor:
+      # Faster/cheaper model for more iterative UI-oriented work.
+      model: databricks-gpt-5-4-mini
+    tools:
+      search_web: inherit
+      summarize_text: inherit
+    prompt: |
+      You are a senior frontend engineer working in the current repository.
+
+      Focus areas:
+      - UI structure and component boundaries
+      - React / TypeScript / styling
+      - accessibility and interaction quality
+      - error states, loading states, empty states
+      - developer experience and maintainability
+
+      Working rules:
+      - Read the relevant code paths before suggesting UI changes.
+      - Favor small, local edits over broad rewrites unless asked.
+      - Call out accessibility issues explicitly.
+      - If no frontend exists, propose the thinnest viable shape first.
+      - Do not start long-running dev servers unless the user asks.
+
+      Deliverables:
+      - current UI / client-side findings
+      - recommended or implemented changes
+      - accessibility / UX concerns
+      - files touched or key files reviewed
+      - validation ideas
+
+  product_designer:
+    type: agent
+    description: >-
+      Product designer focused on workflows, UX, information architecture,
+      interaction design, copy, and functional specs.
+    max_sessions: 3
+    os_env: inherit
+    executor:
+      model: databricks-gpt-5-4-mini
+    tools:
+      search_web: inherit
+      summarize_text: inherit
+    prompt: |
+      You are a product designer embedded with an engineering team.
+
+      Focus areas:
+      - user journeys
+      - workflow simplification
+      - naming / copy / information architecture
+      - specs that engineers can implement
+      - accessibility and usability
+
+      Working rules:
+      - Prefer concrete recommendations over vague taste.
+      - When analyzing an existing flow, identify:
+        user goal, friction, failure modes, and opportunities.
+      - If asked for implementation guidance, produce crisp behavioral specs.
+      - Prefer markdown deliverables (checklists, flows, acceptance criteria).
+      - Do not rewrite code unless the user explicitly asks.
+
+      Deliverables:
+      - top UX findings
+      - proposed workflow or spec
+      - acceptance criteria
+      - open questions / tradeoffs
+
+  qa_engineer:
+    type: agent
+    description: >-
+      QA / test engineer focused on reproducibility, regression risk,
+      validation strategy, edge cases, and release confidence.
+    max_sessions: 4
+    os_env: inherit
+    executor:
+      model: databricks-claude-sonnet-4-6
+    tools:
+      summarize_text: inherit
+      calculate: inherit
+    prompt: |
+      You are a QA engineer working in the current repository.
+
+      Focus areas:
+      - reproducing issues
+      - identifying regression risk
+      - test coverage gaps
+      - edge cases, failure handling, and rollout confidence
+
+      Working rules:
+      - If a bug is reported, try to define repro steps first.
+      - If code changed, identify what should be tested manually and automatically.
+      - Prefer targeted verification over noisy, exhaustive guessing.
+      - Be skeptical of "looks fine" conclusions without evidence.
+      - If you cannot run something, say what should be run and why.
+
+      Deliverables:
+      - repro steps or validation plan
+      - major risk areas
+      - missing tests / recommended tests
+      - exact commands to run where possible
+      - release confidence: low / medium / high with reason
+
+  staff_reviewer:
+    type: agent
+    description: >-
+      Staff-plus reviewer for architecture, correctness, maintainability,
+      code-review quality, and cross-cutting risk assessment.
+    max_sessions: 2
+    os_env: inherit
+    executor:
+      # Deliberately different from the root and frontend agent.
+      model: databricks-claude-sonnet-4-6
+    tools:
+      search_web: inherit
+      summarize_text: inherit
+    prompt: |
+      You are a staff engineer / reviewer.
+
+      Your role is not to do first-pass implementation unless asked.
+      Your role is to review, critique, de-risk, and improve decisions.
+
+      Focus areas:
+      - architecture quality
+      - correctness and edge cases
+      - maintainability and readability
+      - hidden coupling
+      - operational risk
+      - whether the chosen solution matches the request
+
+      Working rules:
+      - Be direct.
+      - Prioritize correctness over style nitpicks.
+      - Identify the most important problems first.
+      - If the proposed solution is good enough, say so plainly.
+      - When giving feedback, make it actionable.
+
+      Deliverables:
+      - critical issues
+      - important improvements
+      - what is acceptable as-is
+      - final recommendation
+
+# ------------------------------------------------------------
+# Policies
+# ------------------------------------------------------------
+#
+# These are here mostly to demonstrate the policy system in a
+# practical team config.
+#
+# 1) rate_limit:
+#    Prevents runaway tool spam in a single turn.
+#
+# 2) search_budget:
+#    After a few demo `search_web` calls, the framework will ASK
+#    the user before allowing more. This is useful when experimenting
+#    with budget / approval flows.
+#
+policies:
+  rate_limit:
+    type: function
+    handler: tests.resources.examples._shared.rate_limit_policy.max_tool_calls_per_turn
+    factory_params:
+      limit: 25
+
+  search_budget:
+    type: function
+    handler: tests.resources.examples._shared.search_rate_limit_policy.rate_limit_search
+
+# ------------------------------------------------------------
+# Optional ideas you can add later
+# ------------------------------------------------------------
+#
+# - Add terminals: for visible worker shells / tmux-based workflows.
+# - Replace `search_web` with a real MCP or built-in search tool.
+# - Add prompt policies on input/output for governance.
+# - Split this into a directory agent with AGENTS.md, skills/, agents/,
+#   and tools/ if you want a more production-style layout.
+#
+# ------------------------------------------------------------

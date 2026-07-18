@@ -1,0 +1,73 @@
+name: combined-policies
+description: |
+  Combined fixture using function and prompt policy types
+  in one agent.
+
+executor:
+  model: gpt-4o
+
+prompt: Test fixture for combined policy types.
+
+ask_timeout: 60
+
+labels:
+  integrity: "1"
+  sensitivity: public
+
+label_schema:
+  integrity:
+    values: ["0", "1"]
+  sensitivity:
+    values: [public, internal, confidential]
+
+policies:
+  taint_web:
+    type: function
+    on: [tool_call:web_search]
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: allow
+        set_labels: {integrity: "0"}
+        on_phases: [tool_call]
+        on_tools: [web_search]
+    set_labels: [integrity]
+
+  classify_confidential_read:
+    type: function
+    on: [tool_call:read_confidential]
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: allow
+        set_labels: {sensitivity: confidential}
+        on_phases: [tool_call]
+        on_tools: [read_confidential]
+    set_labels: [sensitivity]
+
+  search_rate_limit:
+    type: function
+    handler: tests._fixtures.agents.rate_limit_policies.rate_limit_search
+    factory_params:
+      limit: 2
+
+  observe_writes:
+    type: function
+    handler: tests._fixtures.agents.combined_policies.observe_all
+
+  deny_exfil:
+    type: function
+    on: [tool_call:write_file, tool_call:run_shell]
+    condition:
+      integrity: "0"
+      sensitivity: confidential
+    function:
+      path: omnigent.policies.function.make_fixed_action_callable
+      arguments:
+        action: deny
+        reason: |
+          Agent has both tainted integrity AND confidential
+          sensitivity — file writes / shell are exfiltration
+          risks.
+        on_phases: [tool_call]
+        on_tools: [write_file, run_shell]

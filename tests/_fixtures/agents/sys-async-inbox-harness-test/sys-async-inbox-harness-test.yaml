@@ -1,0 +1,38 @@
+name: sys-async-inbox-harness-test
+description: |
+  Test-only agent that exercises the harness inline drain path for
+  ``sys_read_inbox``.
+
+  NOTE: original used executor.type: claude_sdk + databricks
+  profile. Lossy conversion: dropped the Databricks profile gating;
+  now uses the default openai-agents harness with OPENAI_API_KEY.
+
+async: true
+
+executor:
+  model: gpt-5.4
+
+prompt: |
+  # sys-async-inbox-test
+
+  Test-only agent for the sys_call_async / sys_read_inbox /
+  sys_cancel_async e2e suite.
+
+  ## How to use the async-dispatch tools
+
+  - When the user asks you to dispatch a tool asynchronously, call
+    `sys_call_async` with `tool` set to the target tool's name and
+    `args` set to a JSON-encoded string of the target's arguments.
+  - When the user asks you to drain the inbox, call `sys_read_inbox`
+    (no arguments).
+  - After draining the inbox, quote any literal marker strings
+    from the inbox content verbatim in your reply.
+  - When the user asks you to cancel an in-flight dispatch, call
+    `sys_cancel_async` with `handle_id` set to the value of the
+    `task_id` field from the handle JSON.
+
+tools:
+  tag_label:
+    type: function
+    description: Echo the label inside SYS_ASYNC_TAG[...]. Returns instantly.
+    callable: tests._fixtures.agents._inbox_tools.tag_label

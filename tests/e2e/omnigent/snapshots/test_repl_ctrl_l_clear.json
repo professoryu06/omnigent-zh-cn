@@ -1,0 +1,5 @@
+{
+    "exit_code": {"kind": "exact", "value": 0},
+    "screen_clear_sequence_written": {"kind": "exact", "value": true},
+    "repl_still_alive_after_clear": {"kind": "exact", "value": true}
+}

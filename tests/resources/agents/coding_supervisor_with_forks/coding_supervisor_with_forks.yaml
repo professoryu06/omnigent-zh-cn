@@ -1,0 +1,114 @@
+# Coding supervisor that gives each worker a forked OS environment.
+#
+# Each worker gets a copy-on-write fork of the project directory.
+# Workers can edit files and run tests freely without interfering with
+# each other or the original.  The supervisor inspects and merges
+# results using the .sessions/ directory, which contains symlinks to
+# each child session's forked environment.
+#
+# Usage:
+#   cd your-project/
+#   .venv/bin/python -m omnigent examples/coding_supervisor_with_forks.yaml
+#
+# Example prompts:
+#
+#   "Implement dark mode.  Have both workers try different approaches,
+#    then merge the better one."
+#
+#   "Fix the auth bug.  Have worker_a investigate and worker_b write tests.
+#    Merge both when done."
+#
+# How it works:
+#   - Each worker session gets a hardlink-tree clone of the project (fast,
+#     O(files) not O(data)).  Writes break hardlinks lazily so the original
+#     is never modified.
+#   - Worker environments are accessible at .sessions/worker_a/<session>/
+#     and .sessions/worker_b/<session>/ in the supervisor's OS environment.
+#   - The supervisor uses its normal sys_os_read, sys_os_shell, etc. to
+#     inspect and diff worker trees — no special tools needed.
+
+name: forked_coding_supervisor
+prompt: |
+  You are a coding supervisor. You have two workers, each with their own
+  isolated fork of the project directory. They can freely edit files and
+  run tests without affecting each other or the original.
+
+  ## Launching workers
+  Use sys_session_send to start work in a named session:
+    sys_session_send(agent="worker_a", title="main", args="...")
+
+  ## Accessing worker environments
+  To inspect a worker's files, first mount its environment:
+    sys_os_mount_env(path=".w/main", env="worker_a:main")
+
+  Then use your normal OS tools through the mount point:
+    sys_os_read(path=".w/main/src/main.py")
+    sys_os_shell(command="ls -la .w/main/src/")
+    sys_os_shell(command="wc -l .w/main/src/*.py")
+
+  ## Diffing
+  Compare a worker's changes against the original:
+    sys_os_shell(command="diff -r src .w/main/src || true")
+
+  Compare two workers against each other:
+    sys_os_mount_env(path=".v1", env="worker_a:v1")
+    sys_os_mount_env(path=".v2", env="worker_b:v1")
+    sys_os_shell(command="diff -r .v1/src .v2/src || true")
+
+  ## Merging results
+  Read from the worker's tree, write to your own:
+    sys_os_read(path=".w/main/src/new_file.py")
+    sys_os_write(path="src/new_file.py", content=<the content>)
+
+  ## Cleanup
+  Unmount when done inspecting:
+    sys_os_unmount_env(path=".w/main")
+  Close sessions when done (also unmounts and frees the fork):
+    sys_session_close(tool="worker_a", session="main")
+
+  Prefer delegating substantial work to workers rather than doing it yourself.
+
+executor:
+  model: databricks-claude-sonnet-4-6
+
+async: true
+cancellable: true
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none
+
+tools:
+  worker_a:
+    type: agent
+    description: >-
+      Coding worker A. Operates in an isolated fork of the project.
+    prompt: |
+      You are a coding worker. Read files, make changes, run tests, and report
+      what you did. Your environment is an isolated copy — edit freely.
+    max_sessions: 4
+    executor:
+      model: databricks-claude-sonnet-4-6
+    os_env:
+      type: caller_process
+      fork: true
+      sandbox:
+        type: none
+
+  worker_b:
+    type: agent
+    description: >-
+      Coding worker B. Operates in an isolated fork of the project.
+    prompt: |
+      You are a coding worker. Read files, make changes, run tests, and report
+      what you did. Your environment is an isolated copy — edit freely.
+    max_sessions: 4
+    executor:
+      model: databricks-claude-sonnet-4-6
+    os_env:
+      type: caller_process
+      fork: true
+      sandbox:
+        type: none

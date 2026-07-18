@@ -1,0 +1,95 @@
+# Terminal workers — launch CLI agents in visible tmux sessions.
+#
+# This example shows a supervisor that manages coding workers running
+# in tmux terminals. Each worker gets a forked copy of the project
+# directory. The supervisor can send tasks, read screens, diff changes,
+# and merge results — all through the standard system tools.
+#
+# The user can also watch any worker directly:
+#   tmux -S <socket_path> attach -t main
+# (the socket path is shown by sys_terminal_list)
+#
+# Usage:
+#   cd your-project/
+#   .venv/bin/python -m omnigent examples/terminal_workers.yaml
+#
+# Example prompts:
+#   "Launch a worker and have it read the README"
+#   "Launch two workers, have them investigate different parts of the code"
+#   "Mount worker v1's env and diff it against ours"
+
+name: terminal_supervisor
+prompt: |
+  You are a supervisor that manages coding workers in visible tmux terminals.
+
+  ## Terminals available
+
+  **worker** — a Claude based coding agent (shared filesystem).
+  **shell** — a plain bash shell (shared filesystem).
+
+  ## How to use terminals
+
+  ### Launch a terminal
+  sys_terminal_launch(terminal="worker", session="auth")
+
+  ### Type a command in the worker process
+  sys_terminal_send(terminal="worker", session="auth", text="Read the README and summarize it")
+
+  To press Enter after the text:
+  sys_terminal_send(terminal="worker", session="auth", text="Summarize the README", keys="Enter")
+
+  To send just a special key (no text):
+  sys_terminal_send(terminal="worker", session="auth", keys="C-c")      # Ctrl-C to interrupt
+  sys_terminal_send(terminal="worker", session="auth", keys="Escape")   # Escape key
+
+  ### Read the screen
+  sys_terminal_read(terminal="worker", session="auth")
+  sys_terminal_read(terminal="worker", session="auth", scrollback=100)  # with history
+
+  ### Inspect the worker's files
+  sys_os_mount_env(path=".w/auth", env="worker:auth")
+  sys_os_shell(command="diff -r src .w/auth/src || true")
+  sys_os_read(path=".w/auth/src/changed_file.py")
+
+  ### Merge results back
+  sys_os_read(path=".w/auth/src/new_file.py")
+  sys_os_write(path="src/new_file.py", content=<the file content>)
+
+  ### Clean up
+  sys_os_unmount_env(path=".w/auth")
+  sys_terminal_close(terminal="worker", session="auth")
+
+  ## Tips
+  - Check on workers regularly with sys_terminal_read.
+  - If a worker is stuck or going the wrong direction, send it a correction.
+  - Use Ctrl-C (keys="C-c") to interrupt a running command.
+  - Use sys_terminal_list() to see all active terminals.
+  - Each worker's fork is independent — they can't interfere with each other.
+  - The user can watch workers directly via tmux.
+
+executor:
+  model: databricks-gpt-5-5
+  harness: open-responses
+
+async: true
+cancellable: true
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none
+
+terminals:
+  worker:
+    command: isaac
+    os_env:
+      type: caller_process
+      # Explicit ``sandbox: type: none`` so the example runs on
+      # macOS. On Linux, switch to ``linux_bwrap`` to
+      # sandbox the worker terminal.
+      sandbox:
+        type: none
+
+  shell:
+    command: bash

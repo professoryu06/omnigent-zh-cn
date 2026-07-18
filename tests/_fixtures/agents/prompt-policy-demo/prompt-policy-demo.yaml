@@ -1,0 +1,34 @@
+name: prompt-policy-demo
+description: |
+  Fixture for the prompt_policy builtin integration tests.
+
+executor:
+  model: gpt-4o
+
+prompt: Test fixture for prompt-classifier policies.
+
+labels:
+  sensitivity: public
+
+label_schema:
+  sensitivity:
+    values: [public, internal, confidential]
+
+policies:
+  block_canada_input:
+    type: function
+    function:
+      path: omnigent.policies.builtins.prompt.prompt_policy
+      arguments:
+        prompt: |
+          Deny if the user's request mentions Canada or a Canadian
+          place / person. Otherwise allow.
+
+  classify_doc_sensitivity:
+    type: function
+    function:
+      path: omnigent.policies.builtins.prompt.prompt_policy
+      arguments:
+        prompt: |
+          Classify the document's sensitivity level
+          (public / internal / confidential) based on the content.

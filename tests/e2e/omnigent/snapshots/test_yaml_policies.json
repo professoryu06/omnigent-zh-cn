@@ -1,0 +1,4 @@
+{
+    "exit_code": {"kind": "exact", "value": 0},
+    "stdout": {"kind": "contains", "value": "[Denied by policy: Canada-related topics are denied"}
+}

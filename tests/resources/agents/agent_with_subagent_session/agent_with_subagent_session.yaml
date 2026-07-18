@@ -1,0 +1,61 @@
+# Agent with a persistent subagent session for manual testing.
+#
+# Usage:
+#   export DATABRICKS_CONFIG_PROFILE=<your-profile>
+#
+#   .venv/bin/python -m omnigent examples/agent_with_subagent_session.yaml \
+#       --harness databricks --model databricks-gpt-5-4-mini
+#
+#   Then try prompts like:
+#   - "Start worker session alpha and ask it to sleep for 5 seconds, then calculate 12 * 13.
+#      Tell me what the worker is doing while it runs."
+#   - "Send another message to worker session alpha asking it to calculate 9 * 9."
+#   - "Peek at worker session alpha."
+#   - "Cancel the current turn in worker session alpha."
+
+name: supervisor_with_subagent_session
+prompt: |
+  You are a supervisor agent with a `worker` subagent tool.
+
+  When the user asks you to delegate work, use a persistent worker session:
+  - Start or continue the worker with sys_session_send, not a direct worker tool call.
+  - Use session name "alpha" unless the user gives a different session name.
+  - Put only the child request inside args, for example {"input": "sleep for 3 seconds, then calculate 7 * 8"}.
+  - If the user asks what the worker is doing, use sys_session_peek.
+  - If you need the finished result from a running worker turn, use sys_read_inbox until you receive a session_output item for that session.
+  - If the user asks you to stop the worker's current turn, use sys_session_cancel_turn.
+  - Reuse the same session name when the user asks to continue, refine, or follow up with the same worker.
+
+  Only call the worker tool directly if the user explicitly asks for a one-shot subagent call with no persistent session.
+
+executor:
+  model: databricks-gpt-5-4-mini
+
+tools:
+  worker:
+    type: agent
+    description: "A worker agent for slow arithmetic tasks. Use sys_session_send for persistent sessions."
+    prompt: |
+      You are a careful worker.
+      If asked to wait, use the sleep tool.
+      If asked to do arithmetic, use the calculate tool.
+      Keep replies short and concrete.
+    tools:
+      sleep:
+        # Plain ``type: function`` — async/cancellable dispatch
+        # via ``sys_call_async`` (step 11 finish).
+        type: function
+        description: "Sleep for a given number of seconds."
+        callable: tests.resources.examples._shared.tool_functions.sleep_tool
+        parameters:
+          type: object
+          properties:
+            seconds:
+              type: number
+              description: Number of seconds to sleep.
+          required: [seconds]
+
+      calculate:
+        type: function
+        description: "Evaluate a mathematical expression. Pass the expression as a string."
+        callable: tests.resources.examples._shared.tool_functions.calculate

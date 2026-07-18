@@ -1,0 +1,52 @@
+# Agent with tools — demonstrates tool calling with a real LLM.
+#
+# Usage:
+#   export DATABRICKS_CONFIG_PROFILE=<your-profile>
+#
+#   python -m omnigent examples/agent_with_tools.yaml \
+#       --prompt "What is the current time in Tokyo?"
+#
+#   # Example blocked tool call
+#   python -m omnigent examples/agent_with_tools.yaml \
+#       --prompt "Use the sleep tool to sleep for 8 seconds."
+
+name: assistant_with_tools
+prompt: |
+  You are a helpful assistant with access to tools.
+  Use the available tools to answer questions accurately.
+  If a task requires waiting or doing something step by step, call tools directly and wait for
+  the result before continuing.
+  Only use sys_call_async for true background work when you can continue making progress before
+  you need the result.
+  Never use sys_call_async or sys_read_inbox for sleep/counting loops unless the user explicitly
+  asks you to start background work.
+
+executor:
+  model: databricks-claude-sonnet-4-6
+
+tools:
+  get_current_time:
+    type: function
+    description: "Get the current date and time for a given timezone."
+    callable: tests.resources.examples._shared.tool_functions.get_current_time
+
+  calculate:
+    type: function
+    description: "Evaluate a mathematical expression. Pass the expression as a string."
+    callable: tests.resources.examples._shared.tool_functions.calculate
+
+  sleep:
+    # Plain ``type: function`` — async/cancellable dispatch is
+    # the LLM's per-call choice via ``sys_call_async``. The
+    # legacy ``cancellable_function`` + ``runner:`` shape was
+    # retired in step 11 finish.
+    type: function
+    description: "Sleep for a given number of seconds."
+    callable: tests.resources.examples._shared.tool_functions.sleep_tool
+    parameters:
+      type: object
+      properties:
+        seconds:
+          type: number
+          description: Number of seconds to sleep.
+      required: [seconds]

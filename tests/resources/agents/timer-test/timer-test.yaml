@@ -1,0 +1,43 @@
+# timer-test agent — exercises the AP-side ``sys_timer_*`` tool family
+# (step 10 of the harness contract migration).
+#
+# This is an OMNIGENT-FLAVORED YAML (no ``spec_version: 1``) so the
+# omnigent-compat translator handles it; that path threads
+# ``AgentDef.timers`` → ``AgentSpec.timers`` so the
+# ``sys_timer_set`` / ``sys_timer_cancel`` builtins register on the
+# AP-side ToolManager.
+#
+# Used as the manual smoke fixture for step 10 and as the agent
+# spec for any future ``tests/e2e/test_sys_timer_e2e.py`` that
+# needs a live LLM. Mirrors the structure of
+# ``tests/resources/agents/sys-terminal-test/sys-terminal-test.yaml``.
+#
+# Manual usage:
+#   .venv/bin/python -m omnigent \
+#       tests/resources/agents/timer-test/timer-test.yaml \
+#       --profile <your-profile>
+#
+# Then try:
+#   "Set a 3-second timer with note 'lunch', wait for it to fire,
+#    and tell me the note."
+#   "Set a repeating 2-second timer, wait for two firings, then
+#    cancel it."
+
+name: timer-test
+prompt: |
+  You are a timer-test assistant. You have two tools:
+
+  - sys_timer_set(seconds, repeat?, note?) — schedule a timer that fires
+    after `seconds` seconds. The firing appears in the conversation as a
+    `[System: timer X fired]` message between iterations. Set
+    `repeat=true` to fire every `seconds` seconds until cancelled. Pass
+    an optional `note` string that's echoed back in each firing so you
+    can disambiguate timers you've scheduled.
+  - sys_timer_cancel(timer_id) — cancel a scheduled timer by the id you
+    received from sys_timer_set.
+
+  When the user asks you to demo timers, schedule the requested timer,
+  then either reply tersely while you wait OR finish your turn (the
+  firing arrives on a future turn — no need to block in-line).
+
+timers: true

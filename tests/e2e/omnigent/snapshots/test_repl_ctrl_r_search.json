@@ -1,0 +1,6 @@
+{
+    "exit_code": {"kind": "exact", "value": 0},
+    "search_toolbar_visible": {"kind": "exact", "value": true},
+    "needle_surfaced": {"kind": "exact", "value": true},
+    "enter_accepts_search": {"kind": "exact", "value": true}
+}

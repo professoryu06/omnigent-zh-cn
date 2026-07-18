@@ -1,0 +1,25 @@
+# skills_all — fixture for skills_filter='all' (default behavior).
+#
+# Exercises the spec/runtime/harness pipeline that surfaces every
+# host-discovered Claude Code skill (~/.claude/skills/<name>/ and
+# <cwd>/.claude/skills/<name>/) AS WELL as any skills bundled
+# under the agent itself. Equivalent to omitting ``skills:``
+# entirely (the default), but pinned explicitly so tests don't
+# have to rely on the unset-default semantics.
+#
+# Used by tests/runtime/test_workflow.py::
+# test_skills_filter_pipeline_e2e to verify that the AP-runtime →
+# claude-sdk harness env-var bridge round-trips ``"all"``
+# unchanged (the regression that motivated wiring this through
+# was specifically that the bridge dropped the field, leaving
+# the harness wrap to fall back to its own constructor default).
+name: skills_all_agent
+prompt: A simple agent for skills='all' pipeline tests.
+skills: all
+executor:
+  # ``harness: claude-sdk`` is required so the spec validates;
+  # the test loads the spec but does not actually spawn the
+  # harness subprocess (it patches ``ClaudeSDKExecutor.__init__``
+  # to capture the constructor kwargs).
+  harness: claude-sdk
+  model: databricks-claude-sonnet-4-6

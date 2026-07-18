@@ -1,0 +1,46 @@
+# Example: Agent with rate-limited web search
+#
+# This agent can search the web freely up to 3 times.  After that, every
+# additional search requires explicit user approval.  If the user is away
+# (30 s timeout), the search is denied and the agent must find another way.
+#
+# Implementation: a FunctionPolicy with closure state counts web_search
+# calls and returns ASK after the third.  This shows that stateful
+# rate-limiting policies compose cleanly with ASK.
+
+name: rate_limited_search_agent
+prompt: |
+  You are a research assistant.  You can search the web, but you have a
+  budget of 3 free searches per conversation.  After that, each additional
+  search will ask the user for permission.  If the user is unavailable,
+  the search will be denied — in that case, work with the results you
+  already have instead of retrying.
+
+ask_timeout: 30
+
+executor:
+  model: databricks-claude-sonnet-4-6
+
+tools:
+  # ``search_web`` rather than ``web_search`` so the local-tool
+  # name does not collide with the reserved Omnigent built-in
+  # ``web_search`` (see omnigent/tools/builtins/__init__.py
+  # ``BUILTIN_NAMES``). The Python callable target keeps its
+  # original ``web_search`` name in the tool_functions module —
+  # only the agent-facing tool key changes.
+  search_web:
+    type: function
+    description: |
+      Search the web.  You have 3 free searches; additional searches
+      require user approval.
+    callable: tests.resources.examples._shared.tool_functions.web_search
+
+  summarize:
+    type: function
+    description: Summarize text.
+    callable: tests.resources.examples._shared.tool_functions.summarize
+
+policies:
+  search_rate_limit:
+    type: function
+    handler: tests.resources.examples._shared.search_rate_limit_policy.rate_limit_search

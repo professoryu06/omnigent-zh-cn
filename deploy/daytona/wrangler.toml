@@ -1,0 +1,16 @@
+# Cloudflare Worker: egress relay for Omnigent managed hosts on Daytona
+# free tier (Tier 1/2). Lives on the allowlisted *.workers.dev domain
+# and reverse-proxies to your real Omnigent server, so the in-sandbox
+# host's dial-back gets through Daytona's egress firewall. See
+# README.md (this directory) "Free-tier relay setup".
+#
+# Deploy:
+#   npx wrangler deploy --var UPSTREAM_URL:https://your-omnigent-server
+name = "omnigent-daytona-relay"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+# The real Omnigent server this relay forwards to. Override at deploy
+# time with --var UPSTREAM_URL:... (do NOT commit a real URL here).
+UPSTREAM_URL = "https://your-omnigent-server.example.com"
