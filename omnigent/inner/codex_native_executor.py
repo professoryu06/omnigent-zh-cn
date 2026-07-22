@@ -189,9 +189,11 @@ class CodexNativeExecutor(Executor):
             shape. The latest user message is delivered to Codex.
         :param tools: Tool schemas from Omnigent. Ignored here;
             native Codex owns its own tool surface.
-        :param system_prompt: System prompt from the agent spec.
-            Ignored because the native thread was created by the
-            wrapper.
+        :param system_prompt: Agent system prompt from the agent spec. Phase-1 fail-loud only:
+            not applied to the native session (no session-creation/argv/stdin
+            delivery). A non-empty value logs a warning with chars=N only
+            (never the prompt body); when OMNIGENT_STRICT_PROMPT is enabled,
+            fails before user-message inject.
         :param config: Per-turn executor config. Its ``model`` and
             ``extra["reasoning_effort"]`` (carrying the Omnigent web
             ``/model`` pick) are applied via a ``thread/settings/update``

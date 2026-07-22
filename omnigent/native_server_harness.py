@@ -124,8 +124,11 @@ class NativeServerHarness(Executor):
         :param messages: Conversation history; the latest user message is
             delivered.
         :param tools: Omnigent tool schemas (ignored — native owns tools).
-        :param system_prompt: Agent system prompt (ignored — set at
-            session creation).
+        :param system_prompt: Agent system prompt from the agent spec. Phase-1 fail-loud only:
+            not applied to the native session (no session-creation/argv/stdin
+            delivery). A non-empty value logs a warning with chars=N only
+            (never the prompt body); when OMNIGENT_STRICT_PROMPT is enabled,
+            fails before user-message inject.
         :param config: Per-turn config (model override applied if present).
         :returns: Async iterator yielding one terminal event.
         """
