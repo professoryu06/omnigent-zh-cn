@@ -616,10 +616,19 @@ def _parse_executor_spec(data: YamlData | str | bool | None) -> ExecutorSpec | N
     if isinstance(data, str):
         return ExecutorSpec(model=data)
     if isinstance(data, dict):
-        # ``ExecutorSpec.{model,harness,profile}`` are ``str | None``;
-        # missing keys map to ``None`` directly. ``data.get`` happens to
-        # already return ``None`` for missing keys, so the assignment
-        # flows through unchanged.
+        # ``ExecutorSpec.{model,harness,profile}`` are ``str | None``.
+        #
+        # Single-file agent YAML historically accepted only the flat
+        # keys ``model`` / ``harness`` / ``profile`` / ``auth``. The
+        # bundle/server shape nests harness under ``config:`` and uses
+        # ``type: omnigent``. Ignoring those nested keys made a
+        # declared harness disappear so model-prefix inference could
+        # silently substitute a different harness.
+        #
+        # Precedence (aligned with explicit-over-inferred intent):
+        # 1. flat ``executor.harness`` / ``executor.model`` / ``executor.profile``
+        # 2. nested ``executor.config.{harness,model,profile}`` when flat is absent
+        # 3. leave unset so later layers may infer harness from the model
         #
         # Parse ``executor.auth`` into a typed auth dataclass so that
         # inline AgentTool sub-agents can declare auth (e.g. api_key +
@@ -632,10 +641,33 @@ def _parse_executor_spec(data: YamlData | str | bool | None) -> ExecutorSpec | N
             from omnigent.spec.parser import _parse_executor_auth
 
             auth = _parse_executor_auth(data, expand_env=True)
+
+        model = data.get("model")
+        harness = data.get("harness")
+        profile = data.get("profile")
+        raw_config = data.get("config")
+        if isinstance(raw_config, dict):
+            if not (isinstance(harness, str) and harness.strip()):
+                nested_harness = raw_config.get("harness")
+                if isinstance(nested_harness, str) and nested_harness.strip():
+                    harness = nested_harness
+            if not (isinstance(profile, str) and profile.strip()):
+                nested_profile = raw_config.get("profile")
+                if isinstance(nested_profile, str) and nested_profile.strip():
+                    profile = nested_profile
+            if not (isinstance(model, str) and model.strip()):
+                nested_model = raw_config.get("model")
+                if isinstance(nested_model, str) and nested_model.strip():
+                    model = nested_model
+
         return ExecutorSpec(
-            model=data.get("model"),
-            harness=data.get("harness"),
-            profile=data.get("profile"),
+            model=model if isinstance(model, str) or model is None else data.get("model"),
+            harness=harness
+            if isinstance(harness, str) or harness is None
+            else data.get("harness"),
+            profile=profile
+            if isinstance(profile, str) or profile is None
+            else data.get("profile"),
             auth=auth,
         )
     return None
