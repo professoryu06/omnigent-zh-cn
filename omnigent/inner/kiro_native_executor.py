@@ -19,6 +19,8 @@ from omnigent.inner.executor import (
 )
 from omnigent.kiro_native_bridge import KIRO_NATIVE_BRIDGE_DIR_ENV_VAR, inject_user_message
 
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
+
 
 class KiroNativeExecutor(Executor):
     """Harness-side executor for ``omnigent kiro`` web-UI turns."""
@@ -56,6 +58,11 @@ class KiroNativeExecutor(Executor):
         config: ExecutorConfig | None = None,
     ) -> AsyncIterator[ExecutorEvent]:
         """Inject the latest web-UI user message into the Kiro TUI pane."""
+        try:
+            note_native_system_prompt("kiro-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt, config
         text = _latest_user_text(messages, self._bridge_dir)
         if not text:

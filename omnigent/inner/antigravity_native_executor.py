@@ -92,6 +92,8 @@ _logger = logging.getLogger(__name__)
 # the user was on for that turn (the tier-1 model-echo source, design §10.4).
 _USER_INPUT_STEP_TYPE = "CORTEX_STEP_TYPE_USER_INPUT"
 
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
+
 
 class AntigravityNativeExecutor(Executor):
     """
@@ -225,6 +227,11 @@ class AntigravityNativeExecutor(Executor):
             this write path (see the module docstring).
         :returns: Async iterator yielding one terminal event.
         """
+        try:
+            note_native_system_prompt("antigravity-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt
         if config is not None:
             effort = (config.extra or {}).get("reasoning_effort")

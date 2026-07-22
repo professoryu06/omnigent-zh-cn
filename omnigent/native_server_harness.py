@@ -41,6 +41,8 @@ SessionResolver = Callable[[], Awaitable[str | None]]
 # Build a :class:`NativePrompt` from message content.
 PromptBuilder = Callable[[Any], NativePrompt | None]
 
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
+
 
 class NativeServerHarness(Executor):
     """
@@ -128,6 +130,11 @@ class NativeServerHarness(Executor):
         :param config: Per-turn config (model override applied if present).
         :returns: Async iterator yielding one terminal event.
         """
+        try:
+            note_native_system_prompt("native-server", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt
         prompt = _latest_user_prompt(messages, self._build_prompt)
         if prompt is None or prompt.is_empty():

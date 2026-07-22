@@ -24,6 +24,8 @@ from omnigent.pi_native_bridge import (
     refresh_config_auth_headers,
 )
 
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
+
 
 class PiNativeExecutor(Executor):
     """
@@ -92,6 +94,11 @@ class PiNativeExecutor(Executor):
         :yields: :class:`TurnComplete` after the input was queued, or an
             :class:`ExecutorError` when no user text can be sent.
         """
+        try:
+            note_native_system_prompt("pi-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt, config
         text = _latest_user_text(messages, self._bridge_dir)
         if not text:

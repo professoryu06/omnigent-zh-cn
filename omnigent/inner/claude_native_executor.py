@@ -28,6 +28,8 @@ from omnigent.inner.native_attachments import materialize_attachment
 
 _logger = logging.getLogger(__name__)
 
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
+
 
 class ClaudeNativeExecutor(Executor):
     """
@@ -120,6 +122,11 @@ class ClaudeNativeExecutor(Executor):
         :yields: :class:`TurnComplete` after the input was injected,
             or :class:`ExecutorError` on bridge failure.
         """
+        try:
+            note_native_system_prompt("claude-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt, config
         if not _session_is_active(self._bridge_dir, self._request_session_id):
             yield ExecutorError(

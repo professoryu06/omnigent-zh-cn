@@ -36,6 +36,8 @@ from omnigent.reasoning_effort import CODEX_EFFORTS, validate_effort
 
 _logger = logging.getLogger(__name__)
 
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
+
 
 class CodexNativeExecutor(Executor):
     """
@@ -198,6 +200,11 @@ class CodexNativeExecutor(Executor):
             by this bridge.
         :returns: Async iterator yielding one terminal event.
         """
+        try:
+            note_native_system_prompt("codex-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt
         settings_overrides = _model_effort_overrides(config)
         input_items = _latest_user_input_items(messages, self._bridge_dir)

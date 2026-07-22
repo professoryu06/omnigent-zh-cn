@@ -40,6 +40,8 @@ from omnigent.qwen_native_bridge import (
 
 logger = logging.getLogger(__name__)
 
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
+
 
 class QwenNativeExecutor(Executor):
     """Harness-side executor for ``omnigent qwen`` web-UI turns.
@@ -121,6 +123,11 @@ class QwenNativeExecutor(Executor):
         config: ExecutorConfig | None = None,
     ) -> AsyncIterator[ExecutorEvent]:
         """Append the latest web-UI user message to the qwen TUI input file."""
+        try:
+            note_native_system_prompt("qwen-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt, config
         text = _latest_user_text(messages, self._bridge_dir)
         if not text:
