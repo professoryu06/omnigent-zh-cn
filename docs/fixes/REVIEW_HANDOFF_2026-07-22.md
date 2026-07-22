@@ -129,6 +129,10 @@ rg -n "fix-core|fix-scale|若坚持|脚本可恢复|完整 fixed|set at session 
 
 ---
 
+## 4.1 合并前门槛
+
+见 [PRE_MERGE_GATES.md](./PRE_MERGE_GATES.md)。**当前：Gate1/Gate2 未执行，未达 merge 门槛。**
+
 ## 5. 完成标准对照（审查用 checklist）
 
 - [ ] PR #3：逻辑正确、测试红绿、无无关改动 → 可 merge（需维护者操作）
