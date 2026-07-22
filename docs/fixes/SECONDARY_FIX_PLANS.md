@@ -1,183 +1,72 @@
-# 次重要问题修复方案（稳定性 / 性能）
-
-> 目标：双机/长跑/fan-out 下 **不断线、不拖垮、UI 可用**。  
-> 正确性核心未落地前，本层以 **L0 运维** 为主，避免过早大改 server 热路径。
+# 次要与条件性修复方案（修订版）
 
 ---
 
-## 总原则
+## #3012 Host JWT 过期后 reconnect 403（条件性 P0/P1）
 
-1. **先量后改**：用现有日志/metrics 证明瓶颈再上 L1。  
-2. **可回滚**：性能补丁必须单独分支、单独 tag（`fix-scale.N`），方便回退。  
-3. **不牺牲正确性**：缓存必须有失效条件（对照 #3016 教训）。
+### 何时升级
+
+双机部署、频繁重连、无人值守 host 长跑 → 升为 P0/P1。  
+单机短会话开发 → 可保持观察。
+
+### 上游状态（权威以 gh 为准）
+
+| 项 | 记录 |
+|----|------|
+| Upstream PR | https://github.com/omnigent-ai/omnigent/pull/3013 |
+| 关系 | Closes #3012 |
+| 生成时快照 | **OPEN + draft**；作者称本地 155 tests passed；CI Security Gate 等多为 FAILURE/SKIPPED（需再查 head） |
+| 代码范围 | `cli_auth` refresh + lock；login 发 refresh grant；host/runner token factory；错误文案 |
+
+**默认策略：** 跟踪并验证 #3013；**不要**在 zh-cn 再实现另一套 refresh 协议。  
+仅紧急部署且上游长期停滞时，才考虑 **临时 backport**（单独分支，标明上游 SHA）。
+
+### Refresh 风险（必须写进运维认知）
+
+1. **每个 host replica 独立 grant** — 旋转 + reuse 检测会吊销共享 token 文件的副本（设计如此）。  
+2. **同机并发刷新需要锁** — #3013 使用 advisory file lock（lock → re-check → refresh），避免 stale replay 触发 reuse-revocation。
+
+### 方案 A — L0（临时 runbook，**不**等于无人值守恢复）
+
+允许描述为：
+
+- 提高 session TTL（仅推迟）  
+- **人工**重新 `omnigent login`  
+- 明确诊断：403 时先查「登录会话是否过期」，勿误判为 ACL/版本  
+
+**禁止**写成：
+
+- 「定时执行 `omnigent login` 即可无人值守恢复」（login 可能交互，不可靠自动恢复）  
+- 「L0 解决了生命周期问题」
+
+### 方案 B / C
+
+- **不在本 fork 重复实现**；验证 #3013 合并后 sync。  
+- 若 backport：完整移植测试，不发明第二协议。
+
+### 分支
+
+- 默认：无（跟踪）  
+- 紧急：`backport/upstream-3013-jwt-renew`（需书面理由）
 
 ---
 
-## #3012 host JWT 过期后 reconnect 永久 403
+## Scale（#3004 / #3003 / #2702 / #3001）
 
-### 功能目标
-`omnigent login` 认证的 host，在 session JWT 过期后，**自动续期或可无交互恢复**，reconnect 不再永久 403。
+本轮：**基线测量 + 计划 only**。  
+在核心候选（尤其 #3016/#2853）有证据修复前，**不大改 server/runner 热路径**。
 
-### 方案 A — 止血（L0，推荐先做）
-| 项 | 内容 |
-|----|------|
-| 做法 | ① 提高 TTL 环境变量（仅推迟）；② **cron/计划任务** 在 TTL-1h 执行 `omnigent login`（或设备码流程）；③ 文档 runbook：403 时先查 token 过期再查权限 |
-| 改点 | `ops/host-relogin/` 脚本 + Windows 任务计划 / systemd timer |
-| 分支 | `ops/host-jwt-relogin` |
-| 验收 | 模拟过期后脚本可恢复 tunnel，无需猜「版本不兼容」 |
-
-### 方案 B — 功能修复（L1）
-| 项 | 内容 |
-|----|------|
-| 做法 | login 存储 refresh 材料；host reconnect 时刷新 access token（对齐 device-auth 已有 refresh，或 managed runner mint 模式） |
-| 改点 | `cli_auth.py` store_token/load_token、`host/connect.py` 取 token、server host tunnel 鉴权错误信息（过期要明示） |
-| 测试 | 过期 token → refresh → tunnel 200；refresh 失效 → 明确 error |
-| 分支 | `fix/scale-jwt-renew-3012` |
-
-### 方案 C — 上游完整（L2）
-| 项 | 内容 |
-|----|------|
-| 做法 | `omnigent login` 默认走 device-auth + refresh；OIDC/accounts 统一；错误文案区分 expired vs unauthorized |
-| PR | `fix(server): renew host session credentials after JWT expiry (#3012)` |
-| 说明 | issue 正文称已有实现进行中，**先 watch 上游 PR**，避免重复造轮子；无动静再 L1 |
+| Issue | L0 | L1 方向（延后） |
+|-------|----|-----------------|
+| #3004 | 限并行 fan-out | stream 路径缓存 conversation+ACL |
+| #3003 | 减少 policy 热路径依赖 | 复用 policy engine |
+| #2702 | 少开 native terminal | 降频/批处理 idle capture |
+| #3001 | 清理旧会话 | 分页、去掉全量 id 预取 |
 
 ---
 
-## #3004 每个 streamed event 重载 conversation + ACL
+## #2575 pi-native Databricks 非 Claude
 
-### 功能目标
-单 turn 流式路径查询次数显著下降（数量级：从 ~13k/turn 降到可接受范围），fan-out 下 pool 不打满。
-
-### 方案 A — 止血（L0）
-| 项 | 内容 |
-|----|------|
-| 做法 | 限制并行 agent 数；关非必要 UI 订阅；DB 连接池调大仅作缓冲 |
-| 分支 | `ops/fanout-limits` |
-
-### 方案 B — 功能修复（L1，推荐）
-| 项 | 内容 |
-|----|------|
-| 做法 | 在 turn/stream 上下文缓存 conversation metadata + ACL；事件循环内复用；写路径使缓存失效 |
-| 改点 | server stream/event 处理（`comp:server`） |
-| 测试 | 单 turn 事件 N 次，DB query 计数近似 O(1) 于事件数 |
-| 分支 | `fix/scale-stream-acl-3004` |
-
-### 方案 C — 上游完整（L2）
-| 项 | 内容 |
-|----|------|
-| 做法 | 引入 request-scoped unit of work；指标：`stream_event_queries` histogram |
-| PR | `perf(server): cache conversation+ACL across stream events (#3004)` |
-
----
-
-## #3003 Policy engine 每次评估重建
-
-### 功能目标
-policy 评估热路径不再每次 `build_policy_engine` + 全树扫描；tool call 延迟明显下降。
-
-### 方案 A — 止血（L0）
-| 项 | 内容 |
-|----|------|
-| 做法 | 减少 policy 触发频率；gate 条件尽量用确定性检查（文件/测试）而非每 tool policy |
-| 分支 | `ops/policy-light-gates` |
-
-### 方案 B — 功能修复（L1，推荐）
-| 项 | 内容 |
-|----|------|
-| 做法 | 进程内复用 policy engine；conversation tree 增量缓存；评估接口只传 delta |
-| 改点 | `comp:policies` + server 评估入口 |
-| 测试 | 连续 100 次评估，engine 构建次数 = 1（或配置变更时 +1） |
-| 分支 | `fix/scale-policy-cache-3003` |
-
-### 方案 C — 上游完整（L2）
-| 项 | 内容 |
-|----|------|
-| 做法 | 与 #3004 统一缓存层；避免两套失效语义 |
-| PR | `perf(policies): reuse policy engine across evaluations (#3003)` |
-
----
-
-## #2702 Native idle-detection 高频 tmux capture-pane
-
-### 功能目标
-多 terminal fan-out 时 idle 检测不再主导 runner CPU。
-
-### 方案 A — 止血（L0）
-| 项 | 内容 |
-|----|------|
-| 做法 | 控制同时 native terminal 数量；能用 SDK 的路径少开 native TUI |
-| 分支 | `ops/native-fanout-cap` |
-
-### 方案 B — 功能修复（L1，推荐）
-| 项 | 内容 |
-|----|------|
-| 做法 | 降频 + 多 pane 批处理 capture；或改用 tmux pipe-pane / 事件驱动代替轮询 |
-| 改点 | runner native idle watcher（`comp:runner`/`comp:harnesses`） |
-| 测试 | 16 terminal 时 CPU 占用对比基线下降（脚本采样） |
-| 分支 | `fix/scale-idle-tmux-2702` |
-
-### 方案 C — 上游完整（L2）
-| 项 | 内容 |
-|----|------|
-| 做法 | 可配置 `idle_poll_hz`；文档写清默认与 fan-out 建议 |
-| PR | `perf(runner): reduce native idle-detection tmux overhead (#2702)` |
-
----
-
-## #3001 GET /v1/sessions 预取全部 conversation id
-
-### 功能目标
-sessions 列表延迟与 **page size** 相关，而非 O(全部可访问会话)。
-
-### 方案 A — 止血（L0）
-| 项 | 内容 |
-|----|------|
-| 做法 | 少开 Web UI 狂刷；会话归档/清理 |
-| 分支 | 可不建分支，runbook 即可 |
-
-### 方案 B — 功能修复（L1）
-| 项 | 内容 |
-|----|------|
-| 做法 | 列表查询分页下推；去掉「每请求预取全部 id」 |
-| 改点 | server sessions list handler |
-| 测试 | 1000 sessions 时 p95 不再固定 ~230ms+线性恶化 |
-| 分支 | `fix/scale-sessions-list-3001` |
-
-### 方案 C — 上游完整（L2）
-| 项 | 内容 |
-|----|------|
-| 做法 | 与 Web UI 虚拟列表联动 |
-| PR | `perf(server): paginate sessions list without full id prefetch (#3001)` |
-
----
-
-## 次重要层实施节奏
-
-| 阶段 | 做什么 | 版本 |
-|------|--------|------|
-| 现在 | #3012 L0 定时 re-login + fan-out 限流 | `ops/*` 合 main 可不打 fix-scale tag |
-| 核心 fix-core.N 之后 | #3004 / #3003（server 热路径） | `v*-zhcn.fix-scale.1` |
-| 多 native 并行痛时 | #2702 | `fix-scale.2` |
-| UI 抱怨时 | #3001 | `fix-scale.3` |
-
-```bash
-git checkout -b fix/scale-jwt-renew-3012 main
-# ...
-git commit -m "fix(server): renew host credentials after JWT expiry (#3012)"
-gh pr create --base main
-# merge 后
-git tag -a v0.6.0-zhcn.fix-scale.1 -m "scale: jwt renew + ..."
-git push origin v0.6.0-zhcn.fix-scale.1
-```
-
----
-
-## 验收矩阵（次重要）
-
-| ID | 操作 | 期望 |
-|----|------|------|
-| S-3012 | token 过期后 reconnect | 自动恢复或明确「已过期请 login」 |
-| S-3004 | 单 turn 流式 | 查询次数显著下降 |
-| S-3003 | 连续 policy 评估 | 不再每次全量 rebuild |
-| S-2702 | 多 native terminal | runner CPU 明显下降 |
-| S-3001 | 大量 sessions 列表 | 延迟随 page 改善 |
+- 上游 PR：https://github.com/omnigent-ai/omnigent/pull/2833  
+- 生成时快照：OPEN，未 merge；DCO ACTION_REQUIRED 等  
+- **无本地复现与明确缺口时不 backport**
