@@ -91,7 +91,7 @@ rg -n "fix-core|fix-scale|若坚持|若使用|脚本可恢复|完整 fixed|set a
 - [ ] #4 可合并
 - [ ] #5 fail-loud 正确且文档不误导，状态仍是 Phase1 mitigated
 - [ ] #2 Tag 语义无双轨例外
-- [ ] 四 PR open、未 merge、无 Tag
+- [ ] 四 PR open、未 merge、本轮未创建新 Tag（既有 v0.6.0-zhcn.1）
 
 ## 发现问题
 - [P0/P1/P2] …
