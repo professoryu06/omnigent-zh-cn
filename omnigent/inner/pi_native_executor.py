@@ -17,14 +17,13 @@ from omnigent.inner.executor import (
     TurnComplete,
 )
 from omnigent.inner.native_attachments import materialize_attachment
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.pi_native_bridge import (
     PI_NATIVE_BRIDGE_DIR_ENV_VAR,
     PI_NATIVE_REQUEST_SESSION_ID_ENV_VAR,
     enqueue_user_message,
     refresh_config_auth_headers,
 )
-
-from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 
 class PiNativeExecutor(Executor):

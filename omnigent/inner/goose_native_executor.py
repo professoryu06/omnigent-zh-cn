@@ -27,10 +27,9 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 logger = logging.getLogger(__name__)
-
-from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 
 class GooseNativeExecutor(Executor):

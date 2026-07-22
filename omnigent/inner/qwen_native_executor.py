@@ -32,6 +32,7 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.qwen_native_bridge import (
     BRIDGE_DIR_ENV_VAR,
     submit_user_message,
@@ -39,8 +40,6 @@ from omnigent.qwen_native_bridge import (
 )
 
 logger = logging.getLogger(__name__)
-
-from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 
 class QwenNativeExecutor(Executor):

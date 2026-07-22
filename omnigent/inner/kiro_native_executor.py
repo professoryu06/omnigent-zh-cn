@@ -17,9 +17,8 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
-from omnigent.kiro_native_bridge import KIRO_NATIVE_BRIDGE_DIR_ENV_VAR, inject_user_message
-
 from omnigent.inner.native_prompt_delivery import note_native_system_prompt
+from omnigent.kiro_native_bridge import KIRO_NATIVE_BRIDGE_DIR_ENV_VAR, inject_user_message
 
 
 class KiroNativeExecutor(Executor):

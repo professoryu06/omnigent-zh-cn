@@ -83,6 +83,7 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.llms.errors import PermanentLLMError
 from omnigent.reasoning_effort import ANTIGRAVITY_EFFORTS, validate_effort_or_llm_error
 
@@ -91,8 +92,6 @@ _logger = logging.getLogger(__name__)
 # agy step type for a committed user turn; its ``userConfig`` carries the model
 # the user was on for that turn (the tier-1 model-echo source, design §10.4).
 _USER_INPUT_STEP_TYPE = "CORTEX_STEP_TYPE_USER_INPUT"
-
-from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 
 class AntigravityNativeExecutor(Executor):

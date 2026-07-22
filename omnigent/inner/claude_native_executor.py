@@ -25,10 +25,9 @@ from omnigent.inner.executor import (
     TurnComplete,
 )
 from omnigent.inner.native_attachments import materialize_attachment
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 _logger = logging.getLogger(__name__)
-
-from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 
 class ClaudeNativeExecutor(Executor):

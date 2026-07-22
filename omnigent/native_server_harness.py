@@ -32,6 +32,7 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.native_server_transport import NativePrompt, NativeServerTransport
 
 _logger = logging.getLogger(__name__)
@@ -40,8 +41,6 @@ _logger = logging.getLogger(__name__)
 SessionResolver = Callable[[], Awaitable[str | None]]
 # Build a :class:`NativePrompt` from message content.
 PromptBuilder = Callable[[Any], NativePrompt | None]
-
-from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 
 class NativeServerHarness(Executor):
@@ -131,7 +130,7 @@ class NativeServerHarness(Executor):
         :returns: Async iterator yielding one terminal event.
         """
         try:
-            note_native_system_prompt("native-server", system_prompt, applied=False)
+            note_native_system_prompt(self._harness_id, system_prompt, applied=False)
         except ValueError as exc:
             yield ExecutorError(message=str(exc))
             return

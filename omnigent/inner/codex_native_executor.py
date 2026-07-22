@@ -32,11 +32,10 @@ from omnigent.inner.executor import (
     TurnComplete,
 )
 from omnigent.inner.native_attachments import materialize_attachment, parse_data_uri
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.reasoning_effort import CODEX_EFFORTS, validate_effort
 
 _logger = logging.getLogger(__name__)
-
-from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 
 class CodexNativeExecutor(Executor):
