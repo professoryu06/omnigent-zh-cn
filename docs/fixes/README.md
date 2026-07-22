@@ -66,16 +66,17 @@
 
 ## 4. 版本 / Tag 语义（本轮不打 Tag）
 
-优先**单调发布序列**：
+**全部发布 Tag 只允许单一、单调序列**（禁止任何并行版本线）：
 
 ```text
 v0.6.0-zhcn.1
 v0.6.0-zhcn.2
 ```
 
-`core` / `scale` 写入 changelog、release note、GitHub label 或补丁清单，**不**再形成两条独立版本线。
+后续依次递增：`v0.6.0-zhcn.3`、`v0.6.0-zhcn.4`、…
 
-若使用 `fix-core.N` / `fix-scale.N` 命名，必须：每个 Tag 建立在上一发布 Tag 上，并列出完整包含关系、上游基线 SHA、补丁集合。
+- `core` / `scale` **只能**出现在 changelog、release notes、GitHub labels、补丁清单，或**分支名**（如 `fix/core-*`）中。
+- **禁止**形成独立 Tag 序列。`fix-core.N` / `fix-scale.N` **已废弃、禁止使用**——不保留任何「若坚持使用」的例外。
 
 **本轮执行：不创建 Tag、不发布包、不合并 PR。**
 

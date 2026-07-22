@@ -30,16 +30,17 @@
 
 ## 3. Tag / 发布语义
 
-**优先单调序列：**
+**唯一允许的发布 Tag 序列（单调递增）：**
 
 ```text
 v0.6.0-zhcn.1
 v0.6.0-zhcn.2
 ```
 
-- `core` / `scale` → changelog、release notes、labels、补丁清单  
-- **不**再默认使用两条含义不清的 `fix-core.N` / `fix-scale.N` 版本线  
-- 若坚持 `fix-core.N`：每个 Tag 必须基于上一发布 Tag，并列出包含关系、上游基线 SHA、补丁集合  
+后续：`v0.6.0-zhcn.3`、…
+
+- `core` / `scale` **只能**写入 changelog、release notes、labels、补丁清单，或用于**分支名**（如 `fix/core-*` / `fix/scale-*`）。
+- **禁止** `fix-core.N` / `fix-scale.N`（或任何等价双轨 Tag）。该命名**已废弃**；**无例外、无「若坚持使用」路径**。
 
 **本轮：不创建 Tag、不发布包、不合并 PR。**
 
