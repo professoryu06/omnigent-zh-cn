@@ -71,6 +71,5 @@ def test_spec_load_nested_harness_not_replaced_by_model_prefix(tmp_path: Path) -
     )
     spec = load(path)
     assert spec.executor.config.get("harness") == "codex-native", spec.executor.config
-    harness_kind = getattr(spec.executor, "harness_kind", None)
-    if harness_kind is not None:
-        assert harness_kind == "codex-native"
+    # Runtime-observable harness must be codex-native (not optional/None-soft).
+    assert spec.executor.harness_kind == "codex-native"
