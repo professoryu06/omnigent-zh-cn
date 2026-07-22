@@ -24,8 +24,9 @@
 
 - branch:
 - pr:
-- tag:
+- tag: （本轮默认不创建 Tag；若发布，使用单调序列 `v0.6.0-zhcn.N`，由 release 流程决定）
 
 ## 回滚
 
-`git revert <sha>` 或回退 tag `v*-zhcn.fix-*.N-1`
+`git revert <sha>`，或回退到上一发布 tag（例如 `v0.6.0-zhcn.N` 的前一号）。
+**不要**使用已废弃的 `v*-zhcn.fix-core.N` / `fix-scale.N` 双轨命名。
