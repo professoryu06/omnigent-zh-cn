@@ -26,7 +26,7 @@
 | #4 | `fix/core-spec-parse-2746-2747` | `30c04c3a173543f2802f3d8277a1660a616b393a` | **approve** | **否** |
 | #5 | `fix/core-2853-native-prompt` | `1f42a898fbd07e358f87de5cba391a93af1f43b9` | request-changes → 已改 docstring | 是（docstring only） |
 
-**状态：** 四个 PR 均 **OPEN**；**未 merge**；**本轮未创建新 Tag、未发版**（仓库已有既有 Tag 0.6.0-zhcn.1，创建于本轮 PR 之前）。
+**状态：** 四个 PR 均 **OPEN**；**未 merge**；**本轮未创建新 Tag、未发版**（仓库已有既有 Tag v0.6.0-zhcn.1，创建于本轮 PR 之前）。
 
 ---
 
@@ -135,7 +135,7 @@ rg -n "fix-core|fix-scale|若坚持|脚本可恢复|完整 fixed|set at session 
 - [ ] PR #4：harness 硬断言、无多余 nested model/profile → 可 merge
 - [ ] PR #5：fail-loud 正确；docstring 不声称已送达；日志无 prompt 正文；状态仍是 mitigated Phase1
 - [ ] PR #2：Tag 仅 `v0.6.0-zhcn.N`；无双轨例外；#3012/#2853 措辞正确
-- [ ] 四 PR 仍 open；本轮未创建新 Tag（既有 0.6.0-zhcn.1）；无 prompt apply 实现
+- [ ] 四 PR 仍 open；本轮未创建新 Tag（既有 v0.6.0-zhcn.1）；无 prompt apply 实现
 
 ---
 
@@ -149,7 +149,7 @@ rg -n "fix-core|fix-scale|若坚持|脚本可恢复|完整 fixed|set at session 
 | #2967 auto-compact | 未复现/未修 |
 | #3012 JWT refresh | 跟踪上游 #3013，未在 zh-cn 重复实现 |
 | Scale #3003/#3004/#2702/#3001 | 延后 |
-| merge / 新 Tag / 发版 | 禁止由执行 agent 代做（仓库既有 0.6.0-zhcn.1 与本轮无关） |
+| merge / 新 Tag / 发版 | 禁止由执行 agent 代做（仓库既有 v0.6.0-zhcn.1 与本轮无关） |
 
 ---
 
