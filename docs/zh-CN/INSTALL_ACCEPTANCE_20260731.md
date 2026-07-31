@@ -4,6 +4,7 @@
 
 - 目录：`F:\codex-ai\omnigent-zh-next`
 - 分支：`integration/omnigent-zh-20260731`
+- Git checkpoint：`997607b1`；基线回滚标签：`integration-base-20260731`
 - upstream 基线：`7bdaf78c10e16a26e7fb84c254afa2fa96451ffc`
 - 中文来源：`omnigent-zh-cn` `81594243f7a17303b9ba477b938ac323f938c2e4`
 - Python：3.12.13；uv：0.12.0；Node：24.14.0
@@ -39,6 +40,9 @@
   0.144.4 均可用，tmux/bwrap smoke 通过。Ubuntu VHDX 已备份，原文件未动。
 - WSL 候选依赖安装已创建独立 `.venv-wsl`，但 uv 下载 `lark==1.3.1` 时访问
   PyPI 超时；这属于 WSL 出站代理/TUN 路径待处理，不代表 WSL 或 tmux 修复失败。
+- 随后将既有 WSL 桥接从 `172.31.80.1:17892 -> 127.0.0.1:7892` 更新为
+  `172.31.80.1:17892 -> 127.0.0.1:7897`，PyPI 访问恢复，候选 Linux 依赖安装成功。
+- WSL 候选定向验收：35 passed；独立环境为 `.venv-wsl`，未覆盖 Windows `.venv`。
 - 中文 UI：i18n provider/词条已接入入口，但 upstream 新组件尚未逐一替换为 `t()`；
   所以“词条层可用”不等于“全量界面翻译完成”。
 
