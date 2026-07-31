@@ -1,0 +1,41 @@
+name: macOS Chinese distribution smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths-ignore: ['docs/**']
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install tmux
+        run: brew install tmux
+      - name: Build Chinese web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Install and inspect distribution
+        run: |
+          uv sync --locked --extra dev
+          uv run omnigent-zh --help
+          uv run omnigent-zh platform-info --json
+      - name: Start server and verify health
+        run: |
+          uv run omnigent-zh server --port 6769 --no-open > server.log 2>&1 &
+          for attempt in {1..20}; do curl --fail http://127.0.0.1:6769/api/version && break; sleep 1; done
+          curl --fail http://127.0.0.1:6769/api/version

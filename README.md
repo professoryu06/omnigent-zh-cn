@@ -1,542 +1,152 @@
-<div align="center">
-
-# <img src="https://raw.githubusercontent.com/omnigent-ai/omnigent/main/docs/images/omnigent-logo.svg" alt="" height="38" valign="middle" /> Omnigent
-
-### The open-source meta-harness for all your AI agents.
-
-Omnigent is an open-source **meta-harness** that gives you a common orchestration layer over Claude Code, Codex, Cursor, OpenCode, Hermes, Pi, and the agents you write yourself: swap or combine harnesses without rewriting, enforce policies and sandboxing, and collaborate in real time from any device — terminal, browser, phone, or the native desktop app.
-
-[![PyPI version](https://img.shields.io/pypi/v/omnigent.svg)](https://pypi.org/project/omnigent/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/omnigent-ai/omnigent/blob/main/LICENSE)
-[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/omnigent)
-![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)
-
-[omnigent.ai](https://omnigent.ai) · **[⬇️ Download the macOS desktop app](https://omnigent.ai/download/mac)**
-
-</div>
-
 <p align="center">
-  <img src="https://raw.githubusercontent.com/omnigent-ai/omnigent/main/docs/images/omnigent-desktop.png" alt="The Omnigent desktop app: starting a new session, with pinned and project-grouped sessions in the sidebar" width="720" />
+  <img src="docs/images/omnigent-logo.png" alt="Omnigent 中文版" width="96" />
 </p>
 
----
+<h1 align="center">Omnigent 中文版</h1>
 
-## Why Omnigent?
+<p align="center"><b>把本地 AI 编码 CLI 变成可协作、可观察、默认中文的开发工作台。</b></p>
 
-Omnigent lets you:
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache-2.0 License" /></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python 3.12+" />
+  <a href="https://github.com/professoryu06/omnigent-zh-cn/actions/workflows/windows.yml"><img src="https://github.com/professoryu06/omnigent-zh-cn/actions/workflows/windows.yml/badge.svg" alt="Windows CI" /></a>
+  <a href="https://github.com/professoryu06/omnigent-zh-cn/actions/workflows/macos.yml"><img src="https://github.com/professoryu06/omnigent-zh-cn/actions/workflows/macos.yml/badge.svg" alt="macOS CI" /></a>
+  <a href="https://github.com/professoryu06/omnigent-zh-cn/actions/workflows/zh-cn-linux-smoke.yml"><img src="https://github.com/professoryu06/omnigent-zh-cn/actions/workflows/zh-cn-linux-smoke.yml/badge.svg" alt="Linux CI" /></a>
+</p>
 
-- **📱 Work with agents from any device, including your phone.** Sessions
-  follow you: start in your terminal, continue in the browser, pick it up on
-  your phone. Messages, sub-agents, terminals, and files stay in sync.
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#多-cli-协作">多 CLI 协作</a> ·
+  <a href="#平台边界">平台边界</a> ·
+  <a href="#文档">文档</a> ·
+  <a href="#上游联动">上游联动</a>
+</p>
 
-- **🤖 Supervise multiple agents.** Mix Claude Code, Codex, Cursor, OpenCode,
-  Hermes, Pi, and custom agents (defined in YAML) together in the same
-  session. Ask one agent to review another's work, or split a task across
-  agents that are each good at different things.
+<p align="center">
+  <img src="docs/images/omnigent-hero.png" alt="Omnigent 中文 Web 工作台" width="900" />
+</p>
 
-- **🔌 Use any model.** A first-party API key, a Claude/ChatGPT subscription,
-  or any compatible gateway. All first-class.
-
-- **🤝 Collaborate.** Share a session so teammates can chat with your agent
-  and watch it work live, co-drive it on your machine, or fork the
-  conversation to continue on their own.
-
-- **☁️ Run agents in cloud sandboxes.** No laptop required: run sessions in
-  disposable [Modal](https://modal.com), [Daytona](https://www.daytona.io),
-  [Islo](https://islo.dev), [E2B](https://e2b.dev),
-  [CoreWeave](https://docs.coreweave.com/products/sandboxes),
-  [Kubernetes](https://kubernetes.io), [OpenShell](https://github.com/NVIDIA/OpenShell),
-  [Boxlite](https://github.com/boxlite-ai/boxlite), or
-  [Databricks](https://www.databricks.com) sandboxes, launched from the
-  CLI or provisioned by the server per session (*managed hosts*).
-
-- **🛡️ Govern your agents.** Create
-  [policies](#6-govern-your-agents-with-policies) to pause for your approval
-  before risky actions, cap spend, or limit which tools an agent reaches.
-  They apply to the whole server, one agent, or a single chat.
+> **这是完整源码发行版，不是翻译补丁。**
+>
+> 本仓库包含 Omnigent 核心服务、Web UI、Python SDK 和简体中文改动；安装后直接得到可运行的 Omnigent 中文版，**无需另行安装官方 Omnigent**。源码基于 [omnigent-ai/omnigent](https://github.com/omnigent-ai/omnigent)，保留 Apache-2.0 许可证、NOTICE 和上游归属说明。
 
 ---
 
-## Quick start
+## 一句话交给 Agent 安装
 
-### 1. Install
+```text
+执行 uv tool install --force --python 3.12 "git+https://github.com/professoryu06/omnigent-zh-cn.git"，随后运行 omnigent-zh setup；Windows 需要 tmux 多 CLI 协作时，请在 WSL2 内执行同一命令。
+```
 
-One command installs Omnigent and everything it needs:
+这是公开仓库：安装、clone 和阅读不需要 GitHub Token。源码安装会构建 Web UI，因此设备需要 Python 3.12+、[uv](https://docs.astral.sh/uv/)、Node.js 22+ 和 npm。
+
+## 为什么用它
+
+- **中文优先**：Web UI 默认 `zh-CN`，保留设置中的英文切换；不强行翻译模型名、协议名、命令和代码语法。
+- **一个工作台，多种 CLI**：在一个项目会话中使用 Claude Code、Kimi Code、Qwen Code、Hermes、Codex、OpenCode 等 harness，并显示子智能体、文件、终端与执行记录。
+- **本机可运行，边界透明**：Windows 原生支持 Web/SDK；需要 tmux/PTY 的完整原生 CLI 协作时，使用 WSL2。
+- **不替你保管凭据**：模型 Key 和登录状态仅留在使用者的系统密钥链或本机配置中；仓库不包含任何凭据、会话数据库或日志。
+- **可追溯维护**：上游变更会创建人工审查 Issue；中文化、平台适配和安全审计必须通过后才会同步。
+
+## 快速开始
+
+### 1. 安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/omnigent-ai/omnigent/main/scripts/install_oss.sh | sh
+uv tool install --force --python 3.12 "git+https://github.com/professoryu06/omnigent-zh-cn.git"
 ```
 
-<details>
-<summary>Optional integrations and extras</summary>
-
-Need an optional integration? Pass one or more extras to the installer:
+### 2. 检查当前机器模式
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/omnigent-ai/omnigent/main/scripts/install_oss.sh | sh -s -- --extra databricks
-curl -fsSL https://raw.githubusercontent.com/omnigent-ai/omnigent/main/scripts/install_oss.sh | sh -s -- --extra modal,e2b
+omnigent-zh platform-info
 ```
 
-Available user-facing extras include:
+它会明确显示当前机器是 Windows Web/SDK 模式、WSL2/Linux 完整模式，还是 macOS 原生模式。
 
-- **Model providers:** `databricks`, `bedrock`, `vertex`
-- **Sandbox providers:** `modal`, `daytona`, `boxlite`, `cwsandbox`, `e2b`,
-  `openshell`, `kubernetes`
-- **SDK harnesses:** `antigravity`, `copilot`, `cursor`, `agents-sdk`
-- **Storage and memory:** `s3`, `hindsight`
-
-</details>
-
-<details>
-<summary>Prefer to install manually?</summary>
-
-Omnigent needs **Python 3.12+**. Install the `omnigent` package:
+### 3. 配置并启动
 
 ```bash
-uv tool install omnigent        # or: pip install "omnigent"
+omnigent-zh setup
+omnigent-zh
 ```
 
-Manual installs use the same extras syntax, for example:
+首次配置完成后，在浏览器打开本地工作台；从会话中选择 harness、项目目录和模型凭据。刷新后无法连接时，执行：
 
 ```bash
-uv tool install "omnigent[databricks,modal]"
+omnigent-zh server status
+omnigent-zh server start
 ```
 
-Or with [Homebrew](https://github.com/omnigent-ai/homebrew-tap):
-
-```bash
-brew install omnigent-ai/tap/omnigent
-```
-
-Or install straight from the repo:
-
-```bash
-uv tool install -q --python 3.12 git+https://github.com/omnigent-ai/omnigent.git
-```
-
-</details>
-
-<details>
-<summary>Toolchain and prerequisites (if the installer reports a missing tool)</summary>
-
-- **`uv`** (required). https://docs.astral.sh/uv/getting-started/installation/
-  The installer offers to set this up for you.
-- **`git`** (required).
-- **Node.js 22 LTS or newer** with **`npm`** (for the coding-harness CLIs
-  installed by `omnigent run`) and **`pnpm`** (for the web UI). You can get
-  both from a single Node install; pnpm is available via
-  `corepack enable` or `npm install -g pnpm`.
-- **Kiro CLI** (optional), for `omnigent kiro`: install with
-  `curl -fsSL https://cli.kiro.dev/install | bash`, then sign in with Kiro.
-  Kiro tool approvals stay answerable in the embedded Terminal; supported
-  one-time approvals also appear as Chat cards. See
-  `docs/kiro-native-elicitation.md`.
-- **`tmux`**, required by the native `omnigent <harness>` terminal wrappers
-  (`claude`, `codex`, `cursor`, `hermes`, `kiro`, `pi`)
-  (`brew install tmux` / `apt install tmux`; the installer offers
-  to install it for you).
-- **`bubblewrap`** (`bwrap`), **Linux only**. The native `omnigent <harness>`
-  terminal wrappers and the `pi` harness wrap each agent
-  terminal in a `bwrap` OS-sandbox; on Linux that isolation is mandatory, so a
-  missing `bwrap` binary makes those terminals fail to start
-  (`apt install bubblewrap`; the installer offers to install it for you). macOS
-  uses the built-in `seatbelt` sandbox and needs nothing extra.
-- **Databricks** (optional). To use a Databricks workspace as your model
-  provider, install Omnigent with the `databricks` extra:
-  `uv tool install "omnigent[databricks]"` — or pass it to the bootstrap
-  installer with `... | sh -s -- --extra databricks`. Signing in to the
-  workspace also uses the [Databricks CLI](https://docs.databricks.com/aws/en/dev-tools/cli/install).
-
-</details>
-
-<details>
-<summary>Windows (native)</summary>
-
-Omnigent runs natively on Windows in a degraded mode. The `install_oss.sh`
-bootstrap is POSIX-only, so install with `uv` directly:
-
-```powershell
-uv tool install --python 3.12 omnigent
-# or from the repo:
-uv tool install --python 3.12 git+https://github.com/omnigent-ai/omnigent.git
-```
-
-What works on Windows: `omnigent server`, the web UI, and the SDK-based
-harnesses (`omnigent run <agent.yaml>` with the claude-sdk / cursor / codex
-harnesses). Agents run under a Windows **Job Object** for process-tree
-containment.
-
-What is **not** available on Windows (use Linux/macOS, or WSL, for these):
-
-- the native `omnigent claude` / `omnigent codex` / `omnigent cursor`
-  tmux/PTY terminal wrappers (run an SDK harness or the web UI instead);
-- `bwrap`/`seatbelt` filesystem & network sandboxing and the L7 egress proxy
-  — the Job Object backend contains the process tree and enforces resource
-  limits but does **not** isolate the filesystem or network.
-
-</details>
-
-<details>
-<summary>Updating to a new release</summary>
-
-When a newer release is on PyPI, Omnigent shows a one-line notice (once per
-release) pointing here. To update:
-
-```bash
-omni upgrade            # detects how you installed, drains & stops the local
-                        # server, then runs the matching upgrade command
-omni upgrade --check    # just report whether a newer release is available
-```
-
-`omni upgrade` waits for in-flight agent sessions to finish before stopping the
-local server (pass `--force` to stop them immediately); the next `omni` command
-brings the server back up on the new version. Source checkouts update with
-`git pull` instead. Silence the notice with `OMNIGENT_NO_UPDATE_CHECK=1`.
-
-The check queries your configured package index — honoring `UV_INDEX_URL` /
-`PIP_INDEX_URL` and your `uv.toml` / `pip.conf` (default PyPI), so private
-mirrors work out of the box; override with `OMNIGENT_INDEX_URL` if needed.
-
-</details>
-
-<details>
-<summary>Uninstalling Omnigent</summary>
-
-Preview the CLI/profile cleanup that would run by default:
+## 多 CLI 协作
 
-```bash
-omnigent uninstall
-```
+Omnigent 的核心不是把多个模型堆在一起，而是让每个 CLI 在独立会话中完成可观察的子任务，再把结果回传给主会话。
 
-Remove the CLI and installer-managed PATH entries while keeping your local
-history, credentials, and projects:
+| 角色 | 推荐 harness / CLI | 适合的工作 |
+| --- | --- | --- |
+| 主理与拆解 | Claude Code、Kimi Code、Codex | 明确目标、拆分任务、汇总与调度 |
+| 研究与实现 | Claude Code、Kimi Code、Qwen Code、OpenCode | 查资料、实现、测试、写文档 |
+| 独立核验 | Qwen Code、Hermes、Codex | 复核结论、检查风险、提出反例 |
+| 最终审查 | Codex、Hermes | 检查产物、变更范围与验收条件 |
 
-```bash
-omnigent uninstall --yes
-```
+各 CLI 的可用性取决于你已完成的本地安装与登录。Omnigent 不绕过模型服务商的地区、账户、授权或 API 限制。
 
-To also remove Omnigent state under `~/.omnigent`, pass `--purge`; Omnigent
-backs it up outside the target before deletion. Your `~/omnigent` workspace is
-kept unless you explicitly add `--purge-workspace`.
+<p align="center">
+  <img src="docs/images/omnigent-desktop.png" alt="Omnigent 文件、智能体与终端面板" width="900" />
+</p>
 
-```bash
-omnigent uninstall --purge --yes
-```
+## 平台边界
 
-If the installed wheel is broken or `omnigent` is not on `PATH`, run the
-standalone script instead:
+| 平台 | Web / SDK harness | 原生 CLI + tmux | 沙箱机制 | 推荐方式 |
+| --- | ---: | ---: | --- | --- |
+| Windows 原生 | 支持 | 不支持 | Job Object，不隔离文件与网络 | Web / SDK 工作流 |
+| Windows + WSL2 | 支持 | 支持 | bubblewrap | Windows 上的完整多 CLI 工作模式 |
+| macOS | 支持 | 支持 | seatbelt | 原生完整模式 |
+| Linux | 支持 | 支持 | bubblewrap | 原生完整模式 |
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/omnigent-ai/omnigent/main/scripts/uninstall_oss.sh | sh
-```
+Windows 原生没有可用的 tmux/PTY 运行时，因此 Claude、Kimi、Qwen、Hermes 等原生 CLI 协作应在 WSL2 中运行。不要把 Windows 原生 Web 可启动误判为原生 CLI 已可用。
 
-Add `--yes` to the standalone script to perform the previewed CLI cleanup.
+## 上游联动
 
-</details>
+本仓库与 [omnigent-ai/omnigent](https://github.com/omnigent-ai/omnigent) 保持**源码级联动**，而不是运行时依赖联动：安装本仓库就已包含完整运行代码。
 
-### 2. Start your first agent
+- 每周的 `Upstream watch` 会检查上游默认分支；发现新 revision 时创建或更新 `upstream-sync` Issue。
+- 同步必须在独立分支中人工审查：先比较上游差异，再保留 `zh-CN`、独立分发命名、平台提示与发布审计，最后运行测试。
+- 工作流不会自动 merge 或 push 上游代码。
 
-`omnigent` picks a model with you and starts a session in your terminal. It
-also launches a local web UI at `http://localhost:6767` that shows the same
-session in the browser, or on a phone on your network (step 4). The
-[desktop app](https://omnigent.ai/docs/interact/desktop) wraps that same UI
-in a native window and adds OS notifications (with a configurable sound) and a dock badge —
-[download it for macOS](https://omnigent.ai/download/mac).
+完整流程见 [UPSTREAM.md](UPSTREAM.md)。
 
-> [!NOTE]
-> The install puts two names for the same CLI on your PATH: `omnigent` and
-> the shorter `omni`. They're interchangeable.
+## 文档
 
-> [!TIP]
-> On first run, Omnigent picks up model credentials already in your
-> environment (an `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, or a `claude` /
-> `codex` CLI you're logged into) and offers one as the default.
+| 文档 | 内容 |
+| --- | --- |
+| [安装总览](docs/zh-CN/INSTALL.md) | 前置条件、安装、更新与启动 |
+| [Windows 与 WSL2](docs/zh-CN/WINDOWS_WSL2.md) | tmux 原生 CLI 的完整路径 |
+| [macOS](docs/zh-CN/MACOS.md) | seatbelt、tmux 与本机检查 |
+| [故障排查](docs/zh-CN/TROUBLESHOOTING.md) | 服务、Git 安装、模型与 Hermes 已知问题 |
+| [交给 Agent 的安装指令](docs/zh-CN/AGENT_INSTALL.md) | 可直接复制的执行约束 |
+| [上游与许可证](UPSTREAM.md) | 来源、同步策略与维护范围 |
 
-```bash
-omnigent
-```
-
-Or launch a specific agent runtime:
+## FAQ
 
-```bash
-omnigent claude                      # Claude Code, in a session your team can join
-omnigent codex                       # Codex
-omnigent cursor                      # Cursor
-omnigent opencode                    # OpenCode
-omnigent hermes                      # Hermes Agent (Nous Research)
-omnigent pi                          # Pi
-```
+**需要再安装官方 Omnigent 吗？**
 
-#### 🐙 Polly and 🟠🔵 Debby
+不需要。本项目就是完整源码发行版；安装官方包可能造成版本与命令混淆。
 
-Two example agents ship with the repo, and they make good first sessions:
+**为什么 Windows 上不能直接跑 tmux 多 CLI？**
 
-```bash
-omnigent run examples/polly/
-omnigent run examples/debby/
+原生 Windows 没有 Omnigent 原生 harness 所需的 tmux/PTY 运行环境。使用 WSL2 是完整、已验证的路径。
 
-# ...or on a different harness (sub-agents keep their own):
-omnigent run examples/polly/ --harness <harness>
-omnigent run examples/debby/ --harness <harness>
-```
+**能否把 API Key 放进仓库？**
 
-**🐙 Polly** is a multi-agent coding orchestrator who writes no code herself.
-She's the tech lead: she plans, delegates the work to coding sub-agents
-(Claude Code, Codex, or Pi) in parallel git worktrees, then routes each diff
-to a reviewer from a different vendor than the one that wrote it. You merge.
+不能。使用 `omnigent-zh setup`、系统密钥链或本机 `.env`；发布审计会阻断常见密钥、数据库、日志和构建缓存。
 
-**🟠🔵 Debby** is a brainstorming partner with two heads, one Claude and one GPT.
-Every question you ask goes to both heads, and she lays the two answers out
-side by side. Type `/debate` and the heads critique each other for a few
-rounds before converging. (She needs both a Claude and an OpenAI credential;
-see step 3.)
+**Hermes 可以做唯一审批者吗？**
 
-**Prefer the browser?** Start a server and register your machine as a host:
+不建议。当前运行链路中 Hermes 首次派发可能只产生 `resource_event`；应确认会话历史存在真实任务消息，并由其他执行体或审查者交叉验证。
 
-```bash
-omnigent server --background   # start the local server and web UI in the background
-omnigent host           # (separate terminal) register this machine as a host
-```
+## 贡献与许可证
 
-In the web UI, hit **New Chat**, pick your machine, and go. Check status with
-`omnigent server status`; stop everything with `omnigent stop`.
+欢迎通过 Issue 和 Pull Request 改进中文化、文档、平台适配与测试。涉及上游同步或大范围 UI 词典调整时，请先说明影响范围和验证方式。
 
-### 3. Choose & switch models
-
-```bash
-omnigent setup
-```
-
-Add a credential, set a default, or remove one, grouped by agent. Omnigent
-works with four kinds of credentials:
-
-| | Kind | What it is |
-|---|---|---|
-| 🔑 | **API key** | A first-party vendor key for Anthropic, OpenAI, and similar providers |
-| 🎟️ | **Subscription** | A Claude Pro/Max or ChatGPT plan, via the official `claude` / `codex` CLIs |
-| 🌐 | **Gateway** | Any OpenAI- or Anthropic-compatible `base_url` and key (OpenRouter, LiteLLM, Ollama, vLLM, Azure) |
-| 🧱 | **Databricks** | A Databricks workspace profile (requires the `databricks` extra) |
-
-Defaults are per agent, so a Claude default and a Codex default coexist. You
-can also switch models in the middle of a session with the `/model` command.
-
-<details>
-<summary>Gateway base URLs (OpenRouter, Ollama)</summary>
-
-When you add a **Gateway** credential, `omnigent setup` asks for a base URL
-and a key. The base URL depends on which agent you point it at:
-
-| Provider | For | Base URL | Key |
-|---|---|---|---|
-| **OpenRouter** | Claude Code | `https://openrouter.ai/api` | your OpenRouter key (`sk-or-…`) |
-| **OpenRouter** | Codex / OpenAI agents | `https://openrouter.ai/api/v1` | your OpenRouter key (`sk-or-…`) |
-| **Ollama** (local) | Codex / OpenAI agents | `http://localhost:11434/v1` | any value (Ollama ignores it) |
-
-For Claude Code, point at OpenRouter's Anthropic-compatible endpoint
-(`…/api`, **not** `…/api/v1`). For Codex and the OpenAI-agents harness, use
-the OpenAI-compatible `…/api/v1`.
-
-</details>
-
-### 4. Deploy a server (and use it from your phone📱)
-
-Run Omnigent on a server with a stable URL
-([`deploy/README.md`](https://github.com/omnigent-ai/omnigent/blob/main/deploy/README.md) is the full guide) and your sessions
-become reachable from anywhere, including your phone. The web UI is built for
-mobile, so you get the same chat, sub-agents, terminals, and files, in sync
-with your laptop.
-
-One `docker compose up` runs the server on any host you have (a VPS, a home
-server); **Render** and **Railway** deploy with one click; **Fly.io**, **Hugging
-Face Spaces**, **Modal**, **Cloudflare** (serverless, scale-to-zero), and
-**Databricks Apps** (backed by Lakebase Postgres and Unity Catalog Volumes) are
-covered too — and a **Cloudflare quick tunnel** (public) or **Tailscale**
-(private) reaches a server running on your own laptop without a deploy. The
-server can also provision a cloud sandbox per session (*managed hosts*), so no
-laptop has to stay online. The full menu of targets, the database options, and
-the sandbox setup live in
-[`deploy/README.md`](https://github.com/omnigent-ai/omnigent/blob/main/deploy/README.md).
-
-Once the server is up, sign in and register your laptop as a host:
-
-```bash
-omnigent login https://your-host    # sign in once; run / attach / host reuse the token
-omnigent host  https://your-host    # new sessions can now run on this machine
-```
-
-> [!TIP]
-> On your own network you don't need a deploy. Open your machine's LAN
-> address on your phone (e.g. `http://192.168.x.x:6767`).
-
-### 5. Collaborate with your team
-
-Omnigent supports **multi-user accounts**, controlled by one environment
-variable:
-
-```bash
-OMNIGENT_AUTH_ENABLED=1 omnigent server --background
-```
-
-The **Docker deploy in [step 4](#4-deploy-a-server-and-use-it-from-your-phone)
-turns it on for you** (`OMNIGENT_AUTH_ENABLED` defaults to `1` there).
-
-#### Invite your teammates
-
-Open the web UI (`http://localhost:6767` locally, or your host's URL) and
-sign in as `admin`; first run prints the password and saves it locally. Then
-open **Admin → Members → Invite** to create a single-use invite link, no
-email server needed. Send it over; your teammate opens it, sets a password,
-and they're in. Signup is invite-only.
-
-<!-- TODO: screenshot of Admin → Members → Invite. -->
-
-> [!NOTE]
-> Teammates need to be able to reach the server. A local server is only
-> reachable on your network; for anyone off it, deploy an always-on host
-> (see [step 4](#4-deploy-a-server-and-use-it-from-your-phone)).
-
-#### Code together
-
-- **Share a live session.** Hit **Share** in the web UI and send the link;
-  teammates watch your agent work and chat with it in real time.
-- **Co-drive.** A teammate co-attaches to your running session; their
-  messages execute on **your** machine. Great for pairing or handing the
-  keyboard to a domain expert mid-investigation.
-
-  ```bash
-  omnigent attach <session_id>
-  ```
-
-- **Fork.** Clone a conversation onto your own machine and continue
-  independently from the fork point.
-
-  ```bash
-  omnigent run --fork <session_id>
-  ```
-
-Shared sessions identify model-visible messages with `[account]:` labels by
-default. Set `OMNIGENT_SHARED_MESSAGE_ATTRIBUTION_ENABLED=0` to hide those
-labels. This does not change stored authors, UI avatars, or who may approve or
-run privileged actions.
-
-> [!TIP]
-> Want your team to sign in with the logins they already have (**Google,
-> GitHub, Okta, Microsoft**)? Set `OMNIGENT_OIDC_ISSUER` plus a client ID
-> and secret on your deployed server and restart. The full walkthrough,
-> domain allowlists, and the proxy-only `header` auth mode are covered in
-> [`deploy/README.md#auth`](https://github.com/omnigent-ai/omnigent/blob/main/deploy/README.md#auth).
-
-### 6. Govern your agents with policies
-
-**Policies** decide what an agent may do: run shell commands, edit files,
-spend tokens. They check every action and either allow it, block it, or pause
-to ask you first.
-
-- **In the web UI**: open a session's info panel to browse the available
-  policies and toggle them on or off.
-- **In chat**: ask. *"Add a policy that asks me before running shell
-  commands."* The agent sets it up for you.
-
-Want defaults that apply to everyone, or to a specific agent? Define them in
-your server config or an agent's YAML:
-
-```yaml
-policies:
-  approve_shell:
-    type: function
-    handler: omnigent.policies.builtins.safety.ask_on_os_tools   # ask before shell / file writes
-  cap_calls:
-    type: function
-    handler: omnigent.policies.builtins.safety.max_tool_calls_per_session
-    factory_params:
-      limit: 50                    # cap how many tools one session can call
-  budget:
-    type: function
-    handler: omnigent.policies.builtins.cost.cost_budget
-    factory_params:
-      max_cost_usd: 5.00           # hard spend cap...
-      ask_thresholds_usd: [3.00]   # ...with a soft warning on the way
-```
-
-Policies stack across three levels, **server-wide** (admin), **per-agent**
-(developer), and **per-session** (you), with the stricter session rules
-checked first. Spend caps and access limits ship as builtins.
-
-See the [policy guide](https://github.com/omnigent-ai/omnigent/blob/main/docs/POLICIES.md) for the full catalog and trust model.
-
----
-
-## Write your own agent
-
-An agent is a short YAML file: your prompt, your tools — local Python
-functions, MCP servers, and sub-agents a supervisor can delegate to. You don't
-have to write it by hand: agents can build agents, so describe the agent you
-want in any Omnigent chat and it authors the file for you.
-
-```yaml
-name: my_agent
-prompt: You are a helpful data analyst.
-
-executor:
-  harness: claude-sdk          # or: claude-native, codex, codex-native, cursor,
-                               # cursor-native, hermes, hermes-native, opencode,
-                               # pi, pi-native, openai-agents
-
-tools:
-  # A local Python function (schema auto-generated from the signature)
-  word_count:
-    type: function
-    callable: mypackage.mymodule.word_count
-
-  # Tools from an MCP server (a local command, or a remote URL)
-  docs:
-    type: mcp
-    url: https://example.com/mcp
-
-  # A sub-agent the supervisor can delegate to
-  researcher:
-    type: agent
-    prompt: Search for relevant information and summarize it.
-    tools:
-      word_count: inherit
-```
-
-Run it with:
-
-```bash
-omnigent run path/to/my_agent.yaml
-```
-
-The same file can declare sub-agents and reviewers. For a fuller example, see
-Polly at [`examples/polly/`](https://github.com/omnigent-ai/omnigent/tree/main/examples/polly/), and the
-[Agent YAML spec](https://github.com/omnigent-ai/omnigent/blob/main/docs/AGENT_YAML_SPEC.md) for the full schema.
-
----
-
-## Telemetry
-
-Omnigent collects anonymized usage data (telemetry) by default. This data
-contains no sensitive or personally identifiable information. If you're using
-Omnigent through a managed service or distribution, please consult your managed
-service agreement to determine any data collection that may impact your use of
-the service. To opt out, follow our instructions in
-[Usage Telemetry](https://omnigent.ai/docs/deploy/telemetry).
-
----
-
-## Contributing
-
-Contributions are welcome. See [CONTRIBUTING.md](https://github.com/omnigent-ai/omnigent/blob/main/CONTRIBUTING.md) for how to set up your environment, run the checks, and open a pull request.
-
-Adding or changing support for a harness (Claude, Codex, Cursor, OpenCode,
-Hermes, Pi, ...)? Run the [harness test bench](https://github.com/omnigent-ai/omnigent/tree/main/tests/harness_bench)
-to check its capability matrix against observed behavior.
-
-
-### Contributors
-
-Thanks to all of our amazing contributors!
-
-<a href="https://github.com/omnigent-ai/omnigent/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=omnigent-ai/omnigent" />
-</a>
+本项目遵循 [Apache License 2.0](LICENSE)，必须保留 [NOTICE](NOTICE) 与上游版权声明。Omnigent 是其原始作者和贡献者的项目名称与商标；本仓库不代表官方支持渠道。

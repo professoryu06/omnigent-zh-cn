@@ -307,6 +307,8 @@ _RUNNER_ENV_ALLOWLIST: frozenset[str] = frozenset(
     {
         "PATH",
         "PYTHONPATH",
+        "PYTHONUTF8",
+        "PYTHONIOENCODING",
         "HOME",
         "USER",
         "LOGNAME",
@@ -2437,9 +2439,9 @@ class HostProcess:
         # otherwise the terminal goes silent after auth and there's no
         # signal the WS handshake actually completed.
         print(
-            f"✓ Connected as {self._identity.name!r} "
+            f"[OK] Connected as {self._identity.name!r} "
             f"({self._identity.host_id}), {len(hello.runners)} live runner(s). "
-            "Listening for sessions — Ctrl-C to disconnect.",
+            "Listening for sessions - Ctrl-C to disconnect.",
             flush=True,
         )
 

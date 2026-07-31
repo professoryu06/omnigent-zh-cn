@@ -1,0 +1,60 @@
+name: Upstream watch
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read upstream default branch and revision
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch=$(gh api repos/omnigent-ai/omnigent --jq .default_branch)
+          sha=$(gh api "repos/omnigent-ai/omnigent/commits/${branch}" --jq .sha)
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update upstream review issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_BRANCH: ${{ steps.upstream.outputs.branch }}
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
+        run: |
+          gh label create upstream-sync --repo "$GITHUB_REPOSITORY" --color 1D76DB \
+            --description "Requires manual upstream synchronization review" --force
+          current=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label upstream-sync \
+            --json number,body --jq '.[] | select(.body | contains(env.UPSTREAM_SHA)) | .number' | head -n 1)
+          if [ -n "$current" ]; then
+            echo "Upstream ${UPSTREAM_SHA} is already tracked by issue #${current}."
+            exit 0
+          fi
+
+          open_issue=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label upstream-sync \
+            --json number --jq '.[0].number')
+          body=$(cat <<EOF
+          Detected a new upstream Omnigent revision.
+
+          - Repository: https://github.com/omnigent-ai/omnigent
+          - Branch: `${UPSTREAM_BRANCH}`
+          - Revision: `${UPSTREAM_SHA}`
+
+          Review the upstream diff in a dedicated branch. Preserve the zh-CN locale,
+          distribution names, platform guidance, release audit, and run the full test suite
+          before merging anything into this repository.
+          EOF
+          )
+          if [ -n "$open_issue" ]; then
+            gh issue comment "$open_issue" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "Upstream update available" \
+              --label upstream-sync --body "$body"
+          fi

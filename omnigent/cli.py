@@ -28,7 +28,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from omnigent._platform import IS_WINDOWS, resolve_repo_symlink
+from omnigent._platform import IS_WINDOWS, inspect_platform, resolve_repo_symlink
 from omnigent.cli_common import (
     RESUME_PICKER_SENTINEL as _RESUME_PICKER_SENTINEL,
 )
@@ -447,6 +447,8 @@ _SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_S = int(
 
 _LOCAL_DAEMON_ENV_ALLOWLIST: frozenset[str] = frozenset(
     {
+        "PYTHONUTF8",
+        "PYTHONIOENCODING",
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
         "ANTHROPIC_BASE_URL",
@@ -1437,6 +1439,21 @@ def cli() -> None:
     """Omnigent CLI."""
 
 
+@cli.command("platform-info")
+@click.option("--json", "as_json", is_flag=True, help="输出平台能力信息")
+def platform_info(as_json: bool) -> None:
+    """显示 Windows/WSL/native harness 的运行边界。"""
+    capabilities = inspect_platform()
+    if as_json:
+        click.echo(json.dumps(capabilities.as_dict(), ensure_ascii=False, sort_keys=True))
+        return
+    click.echo(f"system: {capabilities.family}")
+    click.echo(f"WSL2: {'yes' if capabilities.is_wsl else 'no'}")
+    click.echo(f"recommended: {capabilities.recommended_mode}")
+    click.echo(f"native tmux/PTY: {'yes' if capabilities.native_tmux_supported else 'no'}")
+    click.echo(f"sandbox: {capabilities.sandbox_backend}")
+
+
 # Names of every subcommand the click group owns. Used by
 # :func:`main` to reject the removed top-level ad-hoc chat path
 # before click reports an opaque "no such command" error.
@@ -1465,6 +1482,7 @@ _CLICK_SUBCOMMANDS: frozenset[str] = frozenset(
         "opencode",
         "pane-picker",
         "pane-split",
+        "platform-info",
         "pi",
         "polly",
         "qwen",
@@ -1509,6 +1527,21 @@ def _should_skip_update_check(argv: list[str]) -> bool:
         "pane-split",
         "pane-picker",
     }
+
+
+def _configure_windows_console_encoding() -> None:
+    """Keep Chinese CLI output safe on Windows legacy code pages."""
+    if not IS_WINDOWS:
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            # Redirected or already-closed streams may not be configurable.
+            continue
 
 
 def _warn_deprecated_harness_path_env_vars() -> None:
@@ -1556,6 +1589,8 @@ def main() -> None:
     so unhandled exceptions are captured even when the user didn't
     enable ``--log`` or ``--debug-events``.
     """
+    _configure_windows_console_encoding()
+
     # Friendly crash handler: replaces Python's raw traceback with a
     # calm, branded crash screen + a one-tap path to file a GitHub issue
     # (browser opens the repo's pre-filled bug-report template with the

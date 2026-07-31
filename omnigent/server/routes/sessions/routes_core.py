@@ -199,11 +199,56 @@ def register_core_routes(
         user_id = _require_user(request, auth_provider)
         content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
         if content_type == "multipart/form-data":
-            result = await _create_bundled_session_from_multipart(request, user_id)
+            result, multipart_metadata = await _create_bundled_session_from_multipart(
+                request, user_id
+            )
             if permission_store is not None and user_id is not None:
                 await asyncio.to_thread(permission_store.ensure_user, user_id)
                 await asyncio.to_thread(
                     permission_store.grant, user_id, result.session_id, LEVEL_OWNER
+                )
+            # Multipart creates used to return 201 with host_id metadata but
+            # never bind or launch a runner. Keep the JSON-create semantics:
+            # validate ownership, bind host/workspace, and ask the host to
+            # spawn exactly once after the session owner grant is in place.
+            if multipart_metadata.host_id is not None:
+                if multipart_metadata.parent_session_id is not None:
+                    raise OmnigentError(
+                        "multipart host launch cannot target a child session",
+                        code=ErrorCode.INVALID_INPUT,
+                    )
+                host_store_inst = getattr(request.app.state, "host_store", None)
+                host_registry_inst = getattr(request.app.state, "host_registry", None)
+                if host_store_inst is None or host_registry_inst is None:
+                    raise OmnigentError(
+                        "host launch is not configured on this server",
+                        code=ErrorCode.INVALID_INPUT,
+                    )
+                from omnigent.server.routes._host_launch import resolve_host_launch
+
+                target = await asyncio.to_thread(
+                    resolve_host_launch,
+                    user_id=user_id,
+                    host_id=multipart_metadata.host_id,
+                    session_id=result.session_id,
+                    host_store=host_store_inst,
+                    host_registry=host_registry_inst,
+                    conversation_store=conversation_store,
+                    permission_store=permission_store,
+                )
+                conv = await asyncio.to_thread(
+                    conversation_store.set_host_id,
+                    result.session_id,
+                    multipart_metadata.host_id,
+                    multipart_metadata.workspace,
+                )
+                from omnigent.server.routes._sessions.helpers import _launch_runner_on_host_impl
+
+                await _launch_runner_on_host_impl(
+                    conv,
+                    conversation_store,
+                    host_registry_inst,
+                    target.conn,
                 )
             # Push the new session to this user's other open tabs so it
             # enters the sidebar without a list poll (WS /sessions/updates).
@@ -475,7 +520,7 @@ def register_core_routes(
     async def _create_bundled_session_from_multipart(
         request: Request,
         user_id: str | None,
-    ) -> CreatedSessionResponse:
+    ) -> tuple[CreatedSessionResponse, SessionCreateMetadata]:
         """
         Handle multipart ``POST /v1/sessions`` with inline agent upload.
 
@@ -542,7 +587,7 @@ def register_core_routes(
                 result.agent_id,
                 runner_router,
             )
-        return result
+        return result, parsed_metadata
 
     # ── GET /sessions/projects ────────────────────────────────────
     #

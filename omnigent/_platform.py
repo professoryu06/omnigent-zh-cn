@@ -18,10 +18,12 @@ import getpass
 import hashlib
 import logging
 import os
+import platform
 import shutil
 import sys
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 _logger = logging.getLogger(__name__)
@@ -129,6 +131,55 @@ IS_POSIX = os.name == "posix"
 IS_LINUX = sys.platform.startswith("linux")
 #: True on macOS specifically (the seatbelt sandbox platform).
 IS_DARWIN = sys.platform == "darwin"
+
+
+@dataclass(frozen=True)
+class PlatformCapabilities:
+    """Stable platform boundary used by installers and support scripts."""
+
+    family: str
+    is_wsl: bool
+    native_tmux_supported: bool
+    sandbox_backend: str
+    requires_bubblewrap: bool
+    recommended_mode: str
+
+    def as_dict(self) -> dict[str, str | bool]:
+        return asdict(self)
+
+
+def inspect_platform(
+    *,
+    os_name: str | None = None,
+    sys_platform: str | None = None,
+    release: str | None = None,
+) -> PlatformCapabilities:
+    """Describe the supported Windows/WSL/native execution boundary."""
+    effective_os = os.name if os_name is None else os_name
+    effective_platform = sys.platform if sys_platform is None else sys_platform
+    effective_release = platform.release() if release is None else release
+    if effective_os == "nt":
+        return PlatformCapabilities(
+            "windows", False, False, "windows_jobobject", False, "sdk_or_web"
+        )
+    if effective_platform == "darwin":
+        return PlatformCapabilities("macos", False, True, "darwin_seatbelt", False, "native_cli")
+    is_wsl = effective_platform.startswith("linux") and (
+        "microsoft" in effective_release.lower() or bool(os.environ.get("WSL_DISTRO_NAME"))
+    )
+    return PlatformCapabilities("linux", is_wsl, True, "linux_bwrap", True, "native_cli")
+
+
+def native_harness_guidance(harness: str, capabilities: PlatformCapabilities | None = None) -> str:
+    """Return the supported fallback when native tmux is unavailable."""
+    active = capabilities or inspect_platform()
+    if active.native_tmux_supported:
+        return ""
+    return (
+        f"`omnigent-zh {harness}` 需要 tmux/PTY，Windows 原生模式不支持该运行方式。"
+        "Windows 原生模式可使用 `omnigent-zh run <agent.yaml>` 或 Web UI；"
+        "需要完整 CLI/tmux 时请使用 WSL2。"
+    )
 
 #: Non-sensitive Windows environment variables that a spawned omnigent
 #: subprocess needs to function, for env-passthrough allowlists that otherwise

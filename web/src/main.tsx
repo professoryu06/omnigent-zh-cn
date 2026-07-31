@@ -15,6 +15,7 @@ import { CapabilitiesProvider } from "./lib/CapabilitiesContext";
 import { resolveIdentity } from "./lib/identity";
 import { initNativeInsets } from "./lib/nativeInsets";
 import { initBrowserTelemetry } from "./lib/telemetry";
+import { I18nProvider } from "./i18n";
 import {
   applyUiFontFamily,
   applyUiFontScale,
@@ -111,26 +112,28 @@ const bootProbe: Promise<ServerInfo> = Promise.race([
 void bootProbe.then((info) => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <CapabilitiesProvider info={info}>
-        <QueryClientProvider client={queryClient}>
-          <ThemeProvider>
-            <PWAUpdateBanner />
-            <TooltipProvider>
-              <ImageLightboxProvider>
-                <BrowserRouter>
-                  <SessionUpdatesProvider>
-                    <RunnerHealthProvider>
-                      <QueueFlushProvider>
-                        <App />
-                      </QueueFlushProvider>
-                    </RunnerHealthProvider>
-                  </SessionUpdatesProvider>
-                </BrowserRouter>
-              </ImageLightboxProvider>
-            </TooltipProvider>
-          </ThemeProvider>
-        </QueryClientProvider>
-      </CapabilitiesProvider>
+      <I18nProvider>
+        <CapabilitiesProvider info={info}>
+          <QueryClientProvider client={queryClient}>
+            <ThemeProvider>
+              <PWAUpdateBanner />
+              <TooltipProvider>
+                <ImageLightboxProvider>
+                  <BrowserRouter>
+                    <SessionUpdatesProvider>
+                      <RunnerHealthProvider>
+                        <QueueFlushProvider>
+                          <App />
+                        </QueueFlushProvider>
+                      </RunnerHealthProvider>
+                    </SessionUpdatesProvider>
+                  </BrowserRouter>
+                </ImageLightboxProvider>
+              </TooltipProvider>
+            </ThemeProvider>
+          </QueryClientProvider>
+        </CapabilitiesProvider>
+      </I18nProvider>
     </StrictMode>,
   );
 });

@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "omnigent"
+name = "omnigent-zh-cn"
 # Keep in sync with omnigent/version.py's VERSION constant.
-version = "0.8.0.dev0"
+version = "0.8.0.dev0+zhcn.1"
 description = "Omnigent: declarative agent authoring and runtime framework"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -26,8 +26,8 @@ dependencies = [
     # one version, so a published `omnigent==X` must resolve the SDK wheels
     # built alongside it (release-omnigent.yml verifies these pins match the
     # release tag). Local/editable installs still resolve via tool.uv.sources.
-    "omnigent-client==0.8.0.dev0",
-    "omnigent-ui-sdk==0.8.0.dev0",
+    "omnigent-zh-cn-client==0.8.0.dev0+zhcn.1",
+    "omnigent-zh-cn-ui-sdk==0.8.0.dev0+zhcn.1",
     # Merged from omnigent + omnigent.
     "pyyaml>=6.0,<7",
     # OpenClaw stores its wrapped acpx registry as JSON5.
@@ -333,13 +333,13 @@ dev = [
 # absorption. `omni` is installed as a short alias — both resolve to
 # the same entry point. (No former-name aliases: only `omnigent` and
 # `omni` ship, internal and OSS alike.)
-omnigent = "omnigent.cli:main"
-omni = "omnigent.cli:main"
+omnigent-zh = "omnigent.cli:main"
+omni-zh = "omnigent.cli:main"
 
 # uv path-deps for the sibling SDK packages (renamed in Stage 3).
 [tool.uv.sources]
-omnigent-client = { path = "sdks/python-client", editable = true }
-omnigent-ui-sdk = { path = "sdks/ui", editable = true }
+omnigent-zh-cn-client = { path = "sdks/python-client", editable = true }
+omnigent-zh-cn-ui-sdk = { path = "sdks/ui", editable = true }
 # Local resolution for the `slack` extra. Only pulled in when `omnigent[slack]`
 # is requested (the extra is opt-in), so a default install never builds it.
 omnigent-slack = { path = "integrations/slack", editable = true }

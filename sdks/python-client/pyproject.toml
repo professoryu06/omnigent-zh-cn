@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "omnigent-client"
-version = "0.8.0.dev0"
+name = "omnigent-zh-cn-client"
+version = "0.8.0.dev0+zhcn.1"
 description = "Python client SDK for the omnigent server API"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -16,10 +16,13 @@ dependencies = [
     # editable alongside the root ``omnigent`` package. Version-locked
     # (==) so a published SDK always pairs with the server release it
     # shipped with (release-omnigent.yml verifies the pin).
-    "omnigent==0.8.0.dev0",
+    "omnigent-zh-cn==0.8.0.dev0+zhcn.1",
     "httpx>=0.27",
     "pydantic>=2.0,<3",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["omnigent_client"]
+
 [tool.uv.sources]
-omnigent = { path = "../..", editable = true }
+omnigent-zh-cn = { path = "../..", editable = true }

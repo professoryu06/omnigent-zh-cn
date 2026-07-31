@@ -55,7 +55,8 @@ jobs:
       - name: Import + CLI smoke
         run: |
           uv run python -c "import omnigent; print('import omnigent OK')"
-          uv run omnigent --help
+          uv run omnigent-zh --help
+          uv run omnigent-zh platform-info --json
 
       - name: Windows-support unit tests (hard)
         run: >-
