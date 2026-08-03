@@ -23,6 +23,15 @@
 
 **当前是否达到合并门槛：否。**
 
+## Gate 2 基线冻结（2026-08-03）
+
+- **冻结 HEAD**：`c3c4ebad074ddce6b458c77dfe06e1ab76498e84`（分支 `docs/fix-plans-core-secondary`）
+- **冻结 manifest**：[BASELINE_FREEZE_20260803.md](./BASELINE_FREEZE_20260803.md)
+- Commit 1（A 类修复 44 文件）：`e691d08cbfca5e1a36656ced8a0f317b495ffbbe`
+- Commit 2（C 类文档 124 文件）：`c3c4ebad074ddce6b458c77dfe06e1ab76498e84`
+- 排除：`nul`（D 类清理卡）、`evidence/`（B 类 grok 卡）
+- **Gate 2 基线已冻结，等待 Codex 验收；基线冻结不改变"未达合并门槛"判定**
+
 证据目录约定：`$EVIDENCE_ROOT`（即 `/tmp/omnigent-premerge-evidence/<run-id>/`，绝对路径，gitignore，不入库）。
 
 **最近文档修复轮次：** `fixrun-20260724-target-v0.6.0-zhcn.2-r05`
