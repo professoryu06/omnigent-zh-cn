@@ -616,6 +616,16 @@ def _parse_executor_spec(data: YamlData | str | bool | None) -> ExecutorSpec | N
     if isinstance(data, str):
         return ExecutorSpec(model=data)
     if isinstance(data, dict):
+        # Reject bundle-style nesting in single-file executor specs.
+        # Keys "type" and "config" belong in a bundle's config.yaml, not in
+        # a flat single-file agent definition.
+        _bundle_keys = sorted(k for k in ("config", "type") if k in data)
+        if _bundle_keys:
+            raise ValueError(
+                f"executor key(s) {_bundle_keys} are bundle config.yaml format; "
+                "single-file agent definitions use the flat form: "
+                "executor: {harness: codex-native, model: gpt-5.4-mini}"
+            )
         # ``ExecutorSpec.{model,harness,profile}`` are ``str | None``;
         # missing keys map to ``None`` directly. ``data.get`` happens to
         # already return ``None`` for missing keys, so the assignment

@@ -83,6 +83,7 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.llms.errors import PermanentLLMError
 from omnigent.reasoning_effort import ANTIGRAVITY_EFFORTS, validate_effort_or_llm_error
 
@@ -225,6 +226,11 @@ class AntigravityNativeExecutor(Executor):
             this write path (see the module docstring).
         :returns: Async iterator yielding one terminal event.
         """
+        try:
+            note_native_system_prompt("antigravity-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt
         if config is not None:
             effort = (config.extra or {}).get("reasoning_effort")

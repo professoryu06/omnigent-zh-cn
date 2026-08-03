@@ -222,6 +222,47 @@ def _pin_codex_config_model(codex_home: Path, model: str) -> None:
     config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _upsert_developer_instructions(codex_home: Path, instructions: str) -> None:
+    """Write *instructions* as top-level ``developer_instructions`` in config.toml.
+
+    Uses the same symlink-materialization pattern as ``_pin_codex_config_model``:
+    never edits the user's shared config through a symlink. The value is
+    JSON-encoded so newlines, quotes, and Unicode are TOML-safe.
+
+    :param codex_home: Private per-session ``CODEX_HOME`` directory.
+    :param instructions: Developer instructions text from the agent spec.
+    """
+    config_path = codex_home / "config.toml"
+    if config_path.is_symlink():
+        target = config_path.resolve()
+        config_path.unlink()
+        if target.is_file():
+            import shutil
+
+            shutil.copy2(target, config_path)
+    existing = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    # ensure_ascii=False keeps non-BMP Unicode as scalar values so
+    # tomllib.loads() round-trips the full prompt (not UTF-16 escapes).
+    di_line = f"developer_instructions = {json.dumps(instructions, ensure_ascii=False)}"
+    lines = existing.splitlines()
+    replaced = False
+    for i, line in enumerate(lines):
+        if line.startswith("["):
+            break
+        if re.match(r"^developer_instructions\s*=", line):
+            lines[i] = di_line
+            replaced = True
+            break
+    if not replaced:
+        # Insert after model pin (line 0) if present, else at top.
+        insert_at = 1 if lines and lines[0].startswith("model") else 0
+        lines.insert(insert_at, di_line)
+    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Best-effort 0600 on POSIX; Windows ignores chmod but the dir is 0700.
+    with contextlib.suppress(OSError):
+        os.chmod(config_path, 0o600)
+
+
 def _inject_mcp_server_config(
     codex_home: Path,
     bridge_dir: Path,
@@ -512,6 +553,7 @@ class CodexNativeAppServer:
     policy_hook_disabled_reason: str | None = None
     policy_notice_pending: bool = False
     pinned_model: str | None = None
+    developer_instructions: str | None = None
     process_registry_tag: str | None = None
     process_owner_lock: CodexNativeProcessOwnerLock | None = None
 
@@ -536,6 +578,28 @@ class CodexNativeAppServer:
         _inject_mcp_server_config(self.codex_home, self.bridge_dir, self.python_executable)
         if self.pinned_model:
             _pin_codex_config_model(self.codex_home, self.pinned_model)
+        # Always clear any prior delivery receipt before this launch decides
+        # whether to write a fresh one. Resume/no-prompt must not inherit a
+        # matching stale receipt as applied.
+        from omnigent.inner.native_prompt_delivery import (
+            clear_prompt_receipt,
+            write_prompt_receipt,
+        )
+
+        clear_prompt_receipt(self.bridge_dir)
+        if self.developer_instructions:
+            # Fresh-thread system prompt delivery: write the agent-spec
+            # instructions into the private config.toml as a top-level
+            # developer_instructions key. Codex injects this as an
+            # independent developer-role message — never argv/env/user input.
+            # Receipt is written only after the config upsert succeeds so a
+            # failed write cannot leave a matching receipt.
+            _upsert_developer_instructions(self.codex_home, self.developer_instructions)
+            write_prompt_receipt(
+                self.bridge_dir,
+                harness_id="codex-native",
+                prompt=self.developer_instructions,
+            )
         # Native policy enforcement needs codex's hook-trust protocol
         # (``currentHash`` / ``trustStatus`` in ``hooks/list``), added in
         # codex 0.129. Below that the hook can never be trusted, so
@@ -1072,6 +1136,7 @@ def build_codex_native_server(
     codex_path: str | None = None,
     extra_config_overrides: list[str] | None = None,
     bypass_sandbox: bool = False,
+    developer_instructions: str | None = None,
 ) -> CodexNativeAppServer:
     """
     Build a configured native Codex app-server process wrapper.
@@ -1157,6 +1222,7 @@ def build_codex_native_server(
         ap_auth_headers=ap_auth_headers,
         python_executable=python_executable,
         pinned_model=model,
+        developer_instructions=developer_instructions,
     )
 
 

@@ -606,3 +606,229 @@ async def test_tilde_boundary_passed_through_to_host(
         spec_cwd="~/universe",
     )
     assert canonical == "/Users/corey/universe/src/foo"
+
+
+
+# ── Windows drive-absolute paths ────────────────────────
+
+
+async def test_windows_drive_absolute_workspace_accepted(
+    host_setup: tuple[HostRegistry, _FakeWebSocket, asyncio.Task[None]],
+) -> None:
+    r"""
+    Verify a Windows drive-absolute workspace is accepted.
+
+    The server must not reject drive-absolute paths with "must start
+    with /". The path is sent verbatim to host.stat; the host returns
+    the canonical path which is stored.
+    """
+    registry, _ws, _ = host_setup
+    _set_stat(
+        registry,
+        r"C:\Users\runner\project",
+        canonical=r"C:\Users\runner\project",
+    )
+
+    canonical = await validate_workspace(
+        host_registry=registry,
+        host_id=_HOST_ID,
+        workspace=r"C:\Users\runner\project",
+        spec_cwd=".",
+    )
+    assert canonical == r"C:\Users\runner\project"
+
+
+async def test_windows_boundary_accepted(
+    host_setup: tuple[HostRegistry, _FakeWebSocket, asyncio.Task[None]],
+) -> None:
+    r"""
+    Verify Windows boundary check works with drive-absolute canonical paths.
+    """
+    registry, _, _ = host_setup
+    _set_stat(
+        registry,
+        r"C:\Users\runner\project\src",
+        canonical=r"C:\Users\runner\project\src",
+    )
+    _set_stat(
+        registry,
+        r"C:\Users\runner\project",
+        canonical=r"C:\Users\runner\project",
+    )
+
+    canonical = await validate_workspace(
+        host_registry=registry,
+        host_id=_HOST_ID,
+        workspace=r"C:\Users\runner\project\src",
+        spec_cwd=r"C:\Users\runner\project",
+    )
+    assert canonical == r"C:\Users\runner\project\src"
+
+
+async def test_windows_subdir_accepted(
+    host_setup: tuple[HostRegistry, _FakeWebSocket, asyncio.Task[None]],
+) -> None:
+    r"""
+    Verify cwd: ./config with a Windows canonical workspace stats
+    the correct Windows sub-path (backslash separator).
+    """
+    registry, _ws, _ = host_setup
+    _set_stat(
+        registry,
+        r"C:\Users\runner\project",
+        canonical=r"C:\Users\runner\project",
+    )
+    _set_stat(
+        registry,
+        r"C:\Users\runner\project\config",
+        canonical=r"C:\Users\runner\project\config",
+    )
+
+    canonical = await validate_workspace(
+        host_registry=registry,
+        host_id=_HOST_ID,
+        workspace=r"C:\Users\runner\project",
+        spec_cwd="./config",
+    )
+    assert canonical == r"C:\Users\runner\project"
+
+
+async def test_windows_drive_relative_rejected(
+    host_setup: tuple[HostRegistry, _FakeWebSocket, asyncio.Task[None]],
+) -> None:
+    r"""
+    Verify C:relative (drive-relative, not fully-qualified) is rejected.
+    """
+    registry, _, _ = host_setup
+    with pytest.raises(WorkspaceValidationError) as exc_info:
+        await validate_workspace(
+            host_registry=registry,
+            host_id=_HOST_ID,
+            workspace="C:relative",
+            spec_cwd=".",
+        )
+    assert "absolute path" in exc_info.value.message
+
+
+async def test_windows_rooted_without_drive_rejected(
+    host_setup: tuple[HostRegistry, _FakeWebSocket, asyncio.Task[None]],
+) -> None:
+    r"""
+    Verify a rooted-without-drive path is rejected.
+    """
+    registry, _, _ = host_setup
+    with pytest.raises(WorkspaceValidationError) as exc_info:
+        await validate_workspace(
+            host_registry=registry,
+            host_id=_HOST_ID,
+            workspace=r"\rooted-without-drive",
+            spec_cwd=".",
+        )
+    assert "absolute path" in exc_info.value.message
+
+
+# ── Route-layer guard ──────────────────────────────────
+
+
+async def test_validate_session_workspace_accepts_windows_drive_absolute_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    r"""
+    Verify the route-layer guard in ``_validate_session_workspace``
+    passes a Windows drive-absolute path through to the shared
+    validator instead of rejecting it with a 400.
+    """
+    from unittest.mock import MagicMock
+
+    from omnigent.server.routes.sessions import _validate_session_workspace
+
+    captured: dict[str, str] = {}
+
+    async def _fake_validate(**kwargs: object) -> str:
+        captured["workspace"] = str(kwargs.get("workspace", ""))
+        return r"C:\\Users\\runner\\project"
+
+    monkeypatch.setattr(
+        "omnigent.server.routes._workspace_validation.validate_workspace",
+        _fake_validate,
+    )
+
+    fake_agent = MagicMock()
+    fake_cache = MagicMock()
+    fake_request = MagicMock()
+
+    result = await _validate_session_workspace(
+        user_id=None,
+        host_id="host_test",
+        workspace=r"C:\\Users\\runner\\project",
+        agent=fake_agent,
+        agent_cache=fake_cache,
+        request=fake_request,
+    )
+    assert result == r"C:\\Users\\runner\\project"
+    assert captured["workspace"] == r"C:\\Users\\runner\\project"
+
+
+# ── UNC absolute paths ────────────────────────
+
+
+async def test_unc_absolute_workspace_accepted(
+    host_setup: tuple[HostRegistry, _FakeWebSocket, asyncio.Task[None]],
+) -> None:
+    """
+    Verify a UNC absolute workspace is accepted and sent verbatim.
+    """
+    registry, _ws, _ = host_setup
+    unc = "\\\\server\\share\\project"
+    _set_stat(registry, unc, canonical=unc)
+
+    canonical = await validate_workspace(
+        host_registry=registry,
+        host_id=_HOST_ID,
+        workspace=unc,
+        spec_cwd=".",
+    )
+    assert canonical == unc
+
+
+async def test_unc_boundary_accepted(
+    host_setup: tuple[HostRegistry, _FakeWebSocket, asyncio.Task[None]],
+) -> None:
+    """
+    Verify UNC boundary check works with UNC canonical paths.
+    """
+    registry, _, _ = host_setup
+    ws_path = "\\\\server\\share\\project\\src"
+    bd_path = "\\\\server\\share\\project"
+    _set_stat(registry, ws_path, canonical=ws_path)
+    _set_stat(registry, bd_path, canonical=bd_path)
+
+    canonical = await validate_workspace(
+        host_registry=registry,
+        host_id=_HOST_ID,
+        workspace=ws_path,
+        spec_cwd=bd_path,
+    )
+    assert canonical == ws_path
+
+
+async def test_unc_subdir_accepted(
+    host_setup: tuple[HostRegistry, _FakeWebSocket, asyncio.Task[None]],
+) -> None:
+    """
+    Verify ``cwd: ./config`` with a UNC canonical workspace stats
+    the correct UNC sub-path (backslash separator).
+    """
+    registry, _ws, _ = host_setup
+    ws_path = "\\\\server\\share\\project"
+    subdir_path = "\\\\server\\share\\project\\config"
+    _set_stat(registry, ws_path, canonical=ws_path)
+    _set_stat(registry, subdir_path, canonical=subdir_path)
+
+    canonical = await validate_workspace(
+        host_registry=registry,
+        host_id=_HOST_ID,
+        workspace=ws_path,
+        spec_cwd="./config",
+    )
+    assert canonical == ws_path

@@ -32,6 +32,7 @@ from omnigent.inner.executor import (
     TurnComplete,
 )
 from omnigent.inner.native_attachments import materialize_attachment, parse_data_uri
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.reasoning_effort import CODEX_EFFORTS, validate_effort
 
 _logger = logging.getLogger(__name__)
@@ -198,6 +199,20 @@ class CodexNativeExecutor(Executor):
             by this bridge.
         :returns: Async iterator yielding one terminal event.
         """
+        # Phase 2 receipt-based apply: only mark applied when the bridge
+        # receipt digest matches this turn's system_prompt exactly.
+        from omnigent.inner.native_prompt_delivery import (
+            read_prompt_receipt,
+            receipt_matches_prompt,
+        )
+
+        _receipt = read_prompt_receipt(self._bridge_dir)
+        _applied = receipt_matches_prompt(_receipt, system_prompt)
+        try:
+            note_native_system_prompt("codex-native", system_prompt, applied=_applied)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt
         settings_overrides = _model_effort_overrides(config)
         input_items = _latest_user_input_items(messages, self._bridge_dir)

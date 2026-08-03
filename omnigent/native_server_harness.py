@@ -32,6 +32,7 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.native_server_transport import NativePrompt, NativeServerTransport
 
 _logger = logging.getLogger(__name__)
@@ -128,6 +129,11 @@ class NativeServerHarness(Executor):
         :param config: Per-turn config (model override applied if present).
         :returns: Async iterator yielding one terminal event.
         """
+        try:
+            note_native_system_prompt(self._harness_id, system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt
         prompt = _latest_user_prompt(messages, self._build_prompt)
         if prompt is None or prompt.is_empty():

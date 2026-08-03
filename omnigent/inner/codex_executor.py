@@ -21,6 +21,9 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, TypeAlias
+from urllib.parse import urlsplit
+
+import tomlkit
 
 from omnigent.llms._usage_observer import notify_from_dict as _notify_usage_from_dict
 from omnigent.reasoning_effort import CODEX_EFFORTS, validate_effort
@@ -121,7 +124,128 @@ _CODEX_HOME_COPY_FILES = ("config.toml",)
 # when their prefix is in the allowlist. ``OPENAI_API_KEY`` is stripped so
 # the codex CLI uses its subscription auth (``auth.json``) rather than a
 # developer API key that would charge separately.
-_CODEX_ENV_DENY_EXACT: frozenset[str] = frozenset({"OPENAI_API_KEY"})
+_CODEX_ENV_DENY_EXACT: frozenset[str] = frozenset({
+    "OPENAI_API_KEY",
+    # Third-party tools (e.g. OpenCodex) inject these to reroute the
+    # Codex CLI through a local proxy.  Omnigent must never inherit them.
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+})
+
+# Top-level config.toml keys that third-party tools (OpenCodex, etc.)
+# inject to reroute the Codex CLI's provider endpoint or override the
+# model.  These are stripped from the private per-session config copy so
+# the CLI falls back to its built-in subscription provider.
+_CODEX_CONFIG_POLLUTION_KEYS: frozenset[str] = frozenset({
+    "openai_base_url",
+    "openai_api_base",
+    "model",
+})
+
+# Loopback endpoint pattern that must never survive config sanitisation.
+_CODEX_CONFIG_FORBIDDEN_ENDPOINT = "127.0.0.1:10100"
+
+# The Windows Meta TUN configuration used on the development host exposes a
+# local mixed HTTP/SOCKS proxy. Codex's Rust resolver is not reliable with
+# Meta's gVisor/fake-IP path, while the proxy path completes the same
+# subscription WebSocket. Keep this setting scoped to the Codex child.
+_CODEX_PROXY_ENV_VAR = "OMNIGENT_CODEX_PROXY"
+_CODEX_DEFAULT_PROXY = "http://127.0.0.1:7897"
+_CODEX_PROXY_SCHEMES = frozenset({"http", "https", "socks5", "socks5h"})
+_CODEX_PROXY_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+)
+_CODEX_LOCAL_NO_PROXY = ("127.0.0.1", "localhost")
+
+
+def _resolve_codex_proxy() -> str:
+    """Resolve and validate the per-child subscription proxy URL."""
+    raw = os.environ.get(_CODEX_PROXY_ENV_VAR)
+    proxy = raw.strip() if raw is not None else ""
+    if not proxy:
+        return _CODEX_DEFAULT_PROXY
+    if proxy.casefold() in {"direct", "none", "off", "disabled"}:
+        raise OSError(
+            f"{_CODEX_PROXY_ENV_VAR} cannot disable proxy routing; "
+            "Omnigent Codex must remain on the configured TUN/proxy path."
+        )
+    try:
+        parsed = urlsplit(proxy)
+        port = parsed.port
+    except ValueError as exc:
+        raise OSError(f"Invalid {_CODEX_PROXY_ENV_VAR} URL") from exc
+    if parsed.scheme.casefold() not in _CODEX_PROXY_SCHEMES:
+        schemes = ", ".join(sorted(_CODEX_PROXY_SCHEMES))
+        raise OSError(
+            f"Invalid {_CODEX_PROXY_ENV_VAR} scheme; expected one of: {schemes}"
+        )
+    if not parsed.hostname or port is None or not 1 <= port <= 65535:
+        raise OSError(
+            f"Invalid {_CODEX_PROXY_ENV_VAR} URL; host and port are required"
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise OSError(
+            f"{_CODEX_PROXY_ENV_VAR} must not contain embedded credentials"
+        )
+    return proxy
+
+
+def _configure_codex_subscription_proxy(env: dict[str, str]) -> str:
+    """Install an explicit proxy route for a subscription Codex child."""
+    for key in _CODEX_PROXY_ENV_KEYS:
+        env.pop(key, None)
+    proxy = _resolve_codex_proxy()
+    # Different Rust HTTP/WebSocket layers consult different conventional
+    # proxy names. Set the same explicit route for all of them so a child
+    # cannot silently fall back to fake-IP direct networking or an ambient
+    # conflicting proxy.
+    for key in _CODEX_PROXY_ENV_KEYS:
+        env[key] = proxy
+    existing_no_proxy = [
+        item.strip()
+        for item in env.get("NO_PROXY", "").split(",")
+        if item.strip()
+    ]
+    for local_host in _CODEX_LOCAL_NO_PROXY:
+        if local_host not in existing_no_proxy:
+            existing_no_proxy.append(local_host)
+    env["NO_PROXY"] = ",".join(existing_no_proxy)
+    return proxy
+
+
+def _sanitise_codex_config(source_text: str) -> str:
+    """Return a cleaned copy of a Codex ``config.toml`` for Omnigent sessions.
+
+    Strips third-party provider routing (``openai_base_url``,
+    ``openai_api_base``) and user model overrides (``model``) so the
+    Codex CLI uses its built-in subscription provider.  Safe fields
+    (``model_reasoning_effort``, ``[features]``, ``[desktop]``, etc.)
+    are preserved.  The cleaned TOML is re-validated: if any string
+    value still references the forbidden loopback endpoint the function
+    raises rather than silently continuing.
+
+    :param source_text: Raw ``config.toml`` content from the user's
+        ``CODEX_HOME``.
+    :returns: Sanitised TOML text.
+    :raises OSError: If the sanitised config still contains a forbidden
+        endpoint after cleaning.
+    """
+    doc = tomlkit.parse(source_text)
+    for key in _CODEX_CONFIG_POLLUTION_KEYS:
+        doc.pop(key, None)
+    result = tomlkit.dumps(doc)
+    if _CODEX_CONFIG_FORBIDDEN_ENDPOINT in result:
+        raise OSError(
+            f"Codex config sanitisation failed: forbidden endpoint "
+            f"{_CODEX_CONFIG_FORBIDDEN_ENDPOINT!r} still present after "
+            f"stripping pollution keys. Refusing to start."
+        )
+    return result
 
 
 def _extract_codex_last_turn_usage(params: object) -> dict[str, int] | None:
@@ -692,10 +816,13 @@ def _populate_codex_home_config(target_dir: Path, source_dir: Path) -> None:
 
     - ``auth.json`` is **symlinked** so OAuth token refreshes written to
       the real home propagate to running sessions without delay.
-    - ``config.toml`` is **copied** so an in-TUI ``/model`` command writes
-      only to the session's own private copy and never mutates the shared
-      ``~/.codex/config.toml``. This keeps model selection and cost-policy
-      enforcement isolated between concurrent sessions.
+    - ``config.toml`` is **sanitised and copied** so third-party provider
+      routing (``openai_base_url``, ``openai_api_base``) and user model
+      overrides are stripped before the Codex CLI reads them.  This
+      prevents tools like OpenCodex from rerouting Omnigent sessions
+      through a local proxy.  Safe fields (``model_reasoning_effort``,
+      ``[features]``, etc.) are preserved.  An in-TUI ``/model`` command
+      still writes only to the session's own private copy.
 
     :param target_dir: The per-conversation temp ``CODEX_HOME``
         directory. Must already exist.
@@ -731,7 +858,14 @@ def _populate_codex_home_config(target_dir: Path, source_dir: Path) -> None:
         dest_path = target_dir / filename
         if dest_path.exists() or dest_path.is_symlink():
             continue
-        shutil.copy2(source_file, dest_path)
+        if filename == "config.toml":
+            # Sanitise: strip third-party provider routing and user model
+            # overrides so the Codex CLI uses its built-in subscription
+            # provider rather than an OpenCodex local proxy.
+            raw = source_file.read_text(encoding="utf-8")
+            dest_path.write_text(_sanitise_codex_config(raw), encoding="utf-8")
+        else:
+            shutil.copy2(source_file, dest_path)
 
 
 def _databricks_codex_base_url(host: str) -> str:
@@ -1252,6 +1386,23 @@ class _CodexAppServerSession:
             argv = [self._codex_path, "app-server"]
             for override in self._codex_config_overrides:
                 argv.extend(["-c", override])
+            logger.info(
+                "Codex app-server launch route: proxy_env_keys=%s "
+                "network_proxy_override=%s model_override=%s",
+                [
+                    key
+                    for key in _CODEX_PROXY_ENV_KEYS
+                    if key in proc_env
+                ],
+                any(
+                    override.startswith("network.proxy_url=")
+                    for override in self._codex_config_overrides
+                ),
+                any(
+                    override.startswith("model=")
+                    for override in self._codex_config_overrides
+                ),
+            )
             self._proc = await _create_subprocess_exec(
                 *argv,
                 stdin=asyncio.subprocess.PIPE,
@@ -2148,6 +2299,19 @@ class CodexExecutor(Executor):
         self._retry_policy = retry_policy if retry_policy is not None else RetryPolicy()
         self._env.update(self._retry_policy.codex_cli.env())
         self._codex_config_overrides: list[str] = []
+        # Subscription mode uses the Meta-compatible local proxy on the
+        # Codex child only. Codex 0.146.0's network-proxy feature also needs
+        # an explicit config override: ``network.proxy_url`` is not a valid
+        # 0.146.0 key, while ``features.network_proxy`` and
+        # ``network_proxy.proxy_url`` are.
+        if not gateway:
+            proxy = _configure_codex_subscription_proxy(self._env)
+            self._codex_config_overrides.extend(
+                [
+                    "features.network_proxy=true",
+                    f"network_proxy.proxy_url={json.dumps(proxy)}",
+                ]
+            )
         if model_provider_override is not None and gateway:
             # Both would fight over model_provider in the -c overrides; the
             # AP producer must emit exactly one routing mechanism.
@@ -2241,6 +2405,13 @@ class CodexExecutor(Executor):
                     auth_refresh_interval_ms=self._gateway_auth_refresh_interval_ms,
                 )
             )
+        if not gateway and model is not None:
+            # Subscription direct mode: pin the resolved model via an
+            # explicit ``-c`` override so neither the user's
+            # ``config.toml`` model nor a third-party override can
+            # shadow it.  ``HARNESS_CODEX_MODEL`` is an input, not a
+            # safety boundary — the argv flag is authoritative.
+            self._codex_config_overrides.append(f"model={json.dumps(model)}")
         if not enable_web_search:
             # Disable Codex's built-in web_search tool so the model can only reach
             # tools exposed by Omnigent as dynamicTools. The top-level web_search

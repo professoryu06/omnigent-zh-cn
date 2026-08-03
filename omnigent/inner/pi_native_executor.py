@@ -17,6 +17,7 @@ from omnigent.inner.executor import (
     TurnComplete,
 )
 from omnigent.inner.native_attachments import materialize_attachment
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.pi_native_bridge import (
     PI_NATIVE_BRIDGE_DIR_ENV_VAR,
     PI_NATIVE_REQUEST_SESSION_ID_ENV_VAR,
@@ -92,6 +93,11 @@ class PiNativeExecutor(Executor):
         :yields: :class:`TurnComplete` after the input was queued, or an
             :class:`ExecutorError` when no user text can be sent.
         """
+        try:
+            note_native_system_prompt("pi-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt, config
         text = _latest_user_text(messages, self._bridge_dir)
         if not text:

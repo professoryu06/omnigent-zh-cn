@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import json
 import logging
 import os
@@ -113,7 +114,9 @@ def _display_log_path(path: Path) -> str:
         otherwise ``str(path)``.
     """
     try:
-        return f"~/{path.relative_to(Path.home())}"
+        # as_posix() keeps display paths slash-stable on Windows; str(Path)
+        # would inject backslashes after the "~/" prefix.
+        return "~/" + path.relative_to(Path.home()).as_posix()
     except ValueError:
         # Not under $HOME (e.g. an OMNIGENT_DATA_DIR outside home).
         return str(path)
@@ -262,6 +265,12 @@ _RUNNER_ENV_ALLOWLIST: frozenset[str] = frozenset(
     {
         "PATH",
         "PYTHONPATH",
+        # Python I/O encoding knobs. Without these, a parent that set
+        # PYTHONUTF8=1 (or PYTHONIOENCODING=utf-8) loses them when the host
+        # spawns runners, so Windows GBK consoles can UnicodeEncodeError on
+        # success banners and crash the host tunnel mid-handshake.
+        "PYTHONUTF8",
+        "PYTHONIOENCODING",
         "HOME",
         "USER",
         "LOGNAME",
@@ -352,6 +361,9 @@ _RUNNER_ENV_ALLOWLIST: frozenset[str] = frozenset(
         # ``OMNIGENT_RUNNER_ENV_PASSTHROUGH=OMNIGENT_CLAUDE_SDK_NO_SANDBOX``).
         # Safe to propagate: not a secret.
         "OMNIGENT_CLAUDE_SDK_NO_SANDBOX",
+        # Per-Codex-child local HTTP/SOCKS proxy selector. The Codex
+        # executor validates it and applies it only to subscription children.
+        "OMNIGENT_CODEX_PROXY",
         # Native-Claude launcher plugin selector: the entry-point NAME of a
         # launcher registered in the ``omnigent.claude_launcher`` group (e.g.
         # ``isaac``). Read by omnigent.claude_launcher.resolve_claude_launch in
@@ -762,6 +774,10 @@ class HostProcess:
             # linger that long in the rare case a runner dies mid-worktree-op —
             # acceptable, since the leak this guards against accrues over hours,
             # not a two-minute worst case.
+            return 0
+        # Windows defines os.waitpid but not WNOHANG / waitpid(-1) orphan
+        # reaping. Host children are managed by subprocess.Popen; skip.
+        if not hasattr(os, "WNOHANG"):
             return 0
         if hasattr(os, "waitid") and hasattr(os, "P_ALL"):
             return self._reap_orphans_waitid()
@@ -1215,6 +1231,12 @@ class HostProcess:
             # _handle_stop (or _cleanup_runners) removed it first —
             # an intentional termination, not a crash to report.
             return
+        if handle.proc.returncode == 0:
+            # Graceful self-exit (e.g. idle timeout). Not a crash —
+            # reporting it would attach a scary error banner to every
+            # normal idle shutdown.
+            _logger.info("Runner %s exited cleanly (code 0)", runner_id)
+            return
         error = _runner_exit_error(handle.proc.returncode, handle.log_path)
         _logger.warning("Runner %s died unexpectedly: %s", runner_id, error)
         await self._report_runner_exit(runner_id, error)
@@ -1465,6 +1487,16 @@ class HostProcess:
                 status="ok",
                 error="a parent path component is not a directory",
             )
+        except FileNotFoundError:
+            # Windows: when an intermediate path component is a regular file,
+            # ``os.makedirs`` raises FileNotFoundError (e.g. WinError 3) rather
+            # than NotADirectoryError. Surface the same clean user-facing
+            # error POSIX gets — status "ok" with error text (not "failed").
+            return HostCreateDirResultFrame(
+                request_id=frame.request_id,
+                status="ok",
+                error="a parent path component is not a directory",
+            )
         except PermissionError:
             return HostCreateDirResultFrame(
                 request_id=frame.request_id,
@@ -1472,6 +1504,24 @@ class HostProcess:
                 error="permission denied",
             )
         except OSError as exc:
+            # Windows WinError 267 (directory name is invalid / not a dir) and
+            # ENOTDIR-style errno also mean a parent component is not a directory.
+            winerror = getattr(exc, "winerror", None)
+            if winerror == 267 or getattr(exc, "errno", None) in (
+                getattr(errno, "ENOTDIR", -1),
+                getattr(errno, "ENOENT", -2),
+            ):
+                # Only map ENOENT when a parent path component exists as a file;
+                # a purely missing parent would normally be created by makedirs.
+                parent = os.path.dirname(expanded.rstrip("\\/"))
+                if winerror == 267 or (
+                    parent and os.path.exists(parent) and not os.path.isdir(parent)
+                ):
+                    return HostCreateDirResultFrame(
+                        request_id=frame.request_id,
+                        status="ok",
+                        error="a parent path component is not a directory",
+                    )
             return HostCreateDirResultFrame(
                 request_id=frame.request_id,
                 status="failed",
@@ -1868,10 +1918,13 @@ class HostProcess:
         # success line after the noisy ``databricks.sdk`` warnings —
         # otherwise the terminal goes silent after auth and there's no
         # signal the WS handshake actually completed.
+        # ASCII-only banner: Windows host daemons often inherit a GBK
+        # stdout code page. Non-ASCII glyphs (checkmark, em dash) raise
+        # UnicodeEncodeError and tear down the just-opened tunnel.
         print(
-            f"✓ Connected as {self._identity.name!r} "
+            f"[OK] Connected as {self._identity.name!r} "
             f"({self._identity.host_id}), {len(hello.runners)} live runner(s). "
-            "Listening for sessions — Ctrl-C to disconnect.",
+            "Listening for sessions - Ctrl-C to disconnect.",
             flush=True,
         )
 

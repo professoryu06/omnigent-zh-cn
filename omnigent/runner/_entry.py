@@ -44,6 +44,10 @@ _RUNNER_IDLE_MONITOR_MAX_POLL_INTERVAL_S = 60.0
 # expires, so a live session's HTTP callbacks never present an expired
 # token. Well under the server-side token TTL.
 _MANAGED_MINT_REFRESH_SKEW_S = 300.0
+# Maximum seconds to wait for the tunnel task to finish its graceful
+# drain after the idle reaper fires. Beyond this the finally backstop
+# force-cancels everything.
+_GRACEFUL_SHUTDOWN_TUNNEL_TIMEOUT_S = 15.0
 _logger = logging.getLogger(__name__)
 
 
@@ -1100,6 +1104,10 @@ async def _run_tunnel_from_env() -> None:
     _lifespan_cm = app.router.lifespan_context(app)
     await _lifespan_cm.__aenter__()
     stop_event = asyncio.Event()
+    # Separate event for the idle reaper: lets the tunnel drain
+    # gracefully while signal/parent-death still use stop_event for
+    # fast termination.
+    tunnel_shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     last_activity_at = loop.time()
 
@@ -1146,6 +1154,8 @@ async def _run_tunnel_from_env() -> None:
             auth_token_factory=auth_token_factory,
             on_reconnect=getattr(app.state, "catch_up_scan", None),
             on_activity=_mark_activity,
+            shutdown_event=tunnel_shutdown_event,
+            on_graceful_shutdown=getattr(app.state, "drain_session_streams", None),
         ),
         name=f"runner-ws-tunnel:{runner_id}",
     )
@@ -1157,7 +1167,7 @@ async def _run_tunnel_from_env() -> None:
                 idle_timeout_s=idle_timeout_s,
                 get_last_activity=_last_activity,
                 has_active_work=_has_active_work,
-                request_shutdown=stop_event.set,
+                request_shutdown=tunnel_shutdown_event.set,
             ),
             name=f"runner-idle-monitor:{runner_id}",
         )
@@ -1184,6 +1194,27 @@ async def _run_tunnel_from_env() -> None:
         )
         if tunnel_task in done:
             await tunnel_task
+        elif (
+            idle_task is not None
+            and idle_task in done
+            and tunnel_shutdown_event.is_set()
+        ):
+            # Idle reaper fired: give the tunnel a bounded window to
+            # finish its graceful drain (flush in-flight dispatches,
+            # close the WS cleanly) before the finally backstop
+            # force-cancels everything.  Upstream 23e4985 uses
+            # asyncio.wait() so that a timeout merely returns the
+            # still-pending task — no premature cancellation here.
+            _drain_done, _drain_pending = await asyncio.wait(
+                {tunnel_task},
+                timeout=_GRACEFUL_SHUTDOWN_TUNNEL_TIMEOUT_S,
+            )
+            if _drain_pending:
+                _logger.warning(
+                    "tunnel did not finish graceful drain within %.0fs; "
+                    "forcing cancellation",
+                    _GRACEFUL_SHUTDOWN_TUNNEL_TIMEOUT_S,
+                )
     finally:
         for task in wait_tasks:
             task.cancel()

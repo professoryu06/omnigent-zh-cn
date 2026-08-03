@@ -58,3 +58,24 @@ class TestIsSubpathOf:
 
     def test_trailing_slash_boundary(self) -> None:
         assert _is_subpath_of("/a/b/c", "/a/b/") is True
+
+    # ── Windows path support ──────────────────────────────
+
+    def test_windows_same_path(self) -> None:
+        assert _is_subpath_of(r"C:\Users\runner\project", r"C:\Users\runner\project") is True
+
+    def test_windows_child_path(self) -> None:
+        assert _is_subpath_of(r"C:\Users\runner\project\src", r"C:\Users\runner\project") is True
+
+    def test_windows_case_insensitive(self) -> None:
+        assert _is_subpath_of(r"c:\users\runner\project", r"C:\Users\Runner\Project") is True
+
+    def test_windows_prefix_collision(self) -> None:
+        r"""``C:\repo2`` must NOT be a subpath of ``C:\repo``."""
+        assert _is_subpath_of(r"C:\repo2", r"C:\repo") is False
+
+    def test_windows_different_drive(self) -> None:
+        assert _is_subpath_of(r"D:\Users\runner", r"C:\Users\runner") is False
+
+    def test_windows_not_a_subpath(self) -> None:
+        assert _is_subpath_of(r"C:\Users\runner", r"C:\Users\runner\project") is False

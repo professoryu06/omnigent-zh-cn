@@ -1048,3 +1048,147 @@ def test_interrupt_with_no_active_turn_and_no_pending_mcp_is_noop(
 
     assert interrupted is False
     assert _FakeCodexNativeClient.requests == []
+
+
+# ── rework: real CodexNativeExecutor receipt + RPC path ─────────────
+
+PROMPT_SENTINEL = "OMNIGENT_PROMPT_SENTINEL_C2853_PHASE2_7f3a9c"
+
+
+def test_executor_matching_receipt_allows_rpc(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Matching full receipt marks applied and still issues turn/start RPC."""
+    from omnigent.inner.native_prompt_delivery import write_prompt_receipt
+
+    _FakeCodexNativeClient.requests = []
+    _FakeCodexNativeClient.created = []
+    _FakeCodexNativeClient.next_turn = 1
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.CodexAppServerClient",
+        _FakeCodexNativeClient,
+    )
+    write_bridge_state(
+        tmp_path,
+        CodexNativeBridgeState(
+            session_id="conv_match",
+            socket_path=str(tmp_path / "app-server.sock"),
+            thread_id="thread_match",
+            codex_home=str(tmp_path / "codex-home"),
+            active_turn_id=None,
+        ),
+    )
+    write_prompt_receipt(tmp_path, harness_id="codex-native", prompt=PROMPT_SENTINEL)
+    executor = CodexNativeExecutor(bridge_dir=tmp_path)
+
+    async def run() -> list[Any]:
+        events: list[Any] = []
+        async for event in executor.run_turn(
+            [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+            [],
+            PROMPT_SENTINEL,
+        ):
+            events.append(event)
+        return events
+
+    events = asyncio.run(run())
+    assert [type(e) for e in events] == [TurnComplete]
+    assert _FakeCodexNativeClient.requests, "expected turn/start RPC after match"
+    # Sentinel must not appear in RPC params or user input.
+    blob = repr(_FakeCodexNativeClient.requests)
+    assert PROMPT_SENTINEL not in blob
+
+
+def test_executor_strict_mismatch_zero_rpc(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Strict mismatch yields sole ExecutorError before any RPC."""
+    monkeypatch.setenv("OMNIGENT_STRICT_PROMPT", "1")
+    _FakeCodexNativeClient.requests = []
+    _FakeCodexNativeClient.created = []
+    _FakeCodexNativeClient.next_turn = 1
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.CodexAppServerClient",
+        _FakeCodexNativeClient,
+    )
+    write_bridge_state(
+        tmp_path,
+        CodexNativeBridgeState(
+            session_id="conv_mm",
+            socket_path=str(tmp_path / "app-server.sock"),
+            thread_id="thread_mm",
+            codex_home=str(tmp_path / "codex-home"),
+            active_turn_id=None,
+        ),
+    )
+    # No receipt → mismatch
+    executor = CodexNativeExecutor(bridge_dir=tmp_path)
+
+    async def run() -> list[Any]:
+        events: list[Any] = []
+        async for event in executor.run_turn(
+            [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+            [],
+            PROMPT_SENTINEL,
+        ):
+            events.append(event)
+        return events
+
+    events = asyncio.run(run())
+    assert len(events) == 1
+    assert isinstance(events[0], ExecutorError)
+    assert "not applying" in events[0].message
+    assert PROMPT_SENTINEL not in events[0].message
+    assert _FakeCodexNativeClient.requests == []
+
+
+def test_executor_warn_mismatch_keeps_user_message(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Non-strict mismatch warns but still sends original user text only."""
+    import logging
+
+    monkeypatch.delenv("OMNIGENT_STRICT_PROMPT", raising=False)
+    caplog.set_level(logging.WARNING)
+    _FakeCodexNativeClient.requests = []
+    _FakeCodexNativeClient.created = []
+    _FakeCodexNativeClient.next_turn = 1
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.CodexAppServerClient",
+        _FakeCodexNativeClient,
+    )
+    write_bridge_state(
+        tmp_path,
+        CodexNativeBridgeState(
+            session_id="conv_warn",
+            socket_path=str(tmp_path / "app-server.sock"),
+            thread_id="thread_warn",
+            codex_home=str(tmp_path / "codex-home"),
+            active_turn_id=None,
+        ),
+    )
+    executor = CodexNativeExecutor(bridge_dir=tmp_path)
+
+    async def run() -> list[Any]:
+        events: list[Any] = []
+        async for event in executor.run_turn(
+            [{"role": "user", "content": [{"type": "input_text", "text": "user-only"}]}],
+            [],
+            PROMPT_SENTINEL,
+        ):
+            events.append(event)
+        return events
+
+    events = asyncio.run(run())
+    assert [type(e) for e in events] == [TurnComplete]
+    assert any("not applying" in r.getMessage() for r in caplog.records)
+    assert all(PROMPT_SENTINEL not in r.getMessage() for r in caplog.records)
+    assert _FakeCodexNativeClient.requests
+    method, params = _FakeCodexNativeClient.requests[0]
+    assert method == "turn/start"
+    assert params["input"] == [{"type": "text", "text": "user-only"}]
+    assert PROMPT_SENTINEL not in repr(params)

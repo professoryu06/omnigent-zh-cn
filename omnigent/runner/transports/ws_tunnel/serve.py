@@ -91,6 +91,10 @@ _FATAL_SERVER_HTTP_STATUSES = {403}
 _TUNNEL_RECYCLE_CLOSE_CODES = {1001, 1012}
 _TUNNEL_RECYCLE_HTTP_STATUSES = {502}
 _RUNNER_TUNNEL_CLOSE_TIMEOUT_S = 0.25
+# Graceful shutdown: allow up to 5 s for the WS close handshake and
+# 5 s for in-flight dispatch tasks to flush their response frames.
+_GRACEFUL_CLOSE_TIMEOUT_S = 5.0
+_GRACEFUL_DRAIN_TIMEOUT_S = 5.0
 RUNNER_TUNNEL_REJECTION_PREFIX = "runner tunnel rejected by server "
 
 # Schemes that, when surfaced through ``InvalidURI.uri``, indicate
@@ -242,6 +246,8 @@ async def serve_tunnel(
     auth_token_factory: Callable[[], str | None] | None = None,
     on_reconnect: Callable[[], Awaitable[None]] | None = None,
     on_activity: Callable[[], None] | None = None,
+    shutdown_event: asyncio.Event | None = None,
+    on_graceful_shutdown: Callable[[], None] | None = None,
 ) -> None:
     """Keep a runner WebSocket tunnel connected to a server.
 
@@ -285,6 +291,9 @@ async def serve_tunnel(
     tunnel_url = _tunnel_url(server_url, runner_id)
     _connected_before = False
     while True:
+        if shutdown_event is not None and shutdown_event.is_set():
+            _logger.info("runner %s: shutdown requested; tunnel loop exiting", runner_id)
+            return
         auth_token = await _refresh_auth_token(auth_token, auth_token_factory)
         if _connected_before and on_reconnect is not None:
             try:
@@ -296,6 +305,11 @@ async def serve_tunnel(
         try:
             _connected_before = True
             activity_kwargs = {"on_activity": on_activity} if on_activity is not None else {}
+            shutdown_kwargs: dict[str, Any] = {}
+            if shutdown_event is not None:
+                shutdown_kwargs["shutdown_event"] = shutdown_event
+            if on_graceful_shutdown is not None:
+                shutdown_kwargs["on_graceful_shutdown"] = on_graceful_shutdown
             await _serve_tunnel_once(
                 app,
                 tunnel_url=tunnel_url,
@@ -305,8 +319,17 @@ async def serve_tunnel(
                 auth_token=auth_token,
                 tunnel_token=tunnel_token,
                 **activity_kwargs,
+                **shutdown_kwargs,
             )
             delay_s = _INITIAL_RECONNECT_DELAY_S
+            # A graceful shutdown returns normally from _serve_tunnel_once;
+            # exit the reconnect loop instead of dialing again.
+            if shutdown_event is not None and shutdown_event.is_set():
+                _logger.info(
+                    "runner %s: graceful shutdown complete; tunnel loop exiting",
+                    runner_id,
+                )
+                return
         except asyncio.CancelledError:
             raise
         except WebSocketException as exc:
@@ -505,8 +528,10 @@ async def _serve_tunnel_once(
     auth_token: str | None = None,
     tunnel_token: str | None = None,
     on_activity: Callable[[], None] | None = None,
+    shutdown_event: asyncio.Event | None = None,
+    on_graceful_shutdown: Callable[[], None] | None = None,
 ) -> None:
-    """Serve one WebSocket connection until it closes.
+    """Serve one WebSocket connection until it closes or shutdown fires.
 
     :param app: Runner ASGI application.
     :param tunnel_url: WebSocket URL to connect to, e.g.
@@ -525,6 +550,10 @@ async def _serve_tunnel_once(
     :param on_activity: Optional sync callback fired for real work
         frames received from the server. Ping keepalives do not
         trigger it.
+    :param shutdown_event: Optional event that, when set, triggers a
+        graceful drain and clean return instead of reconnecting.
+    :param on_graceful_shutdown: Optional sync callback invoked during
+        graceful drain (e.g. ``app.state.drain_session_streams``).
     :returns: None.
     """
     import websockets
@@ -544,10 +573,14 @@ async def _serve_tunnel_once(
     headers.update(databricks_request_headers(server_url, bearer_token=auth_token))
     if tunnel_token:
         headers[RUNNER_TUNNEL_TOKEN_HEADER] = tunnel_token
+    close_timeout = (
+        _GRACEFUL_CLOSE_TIMEOUT_S if shutdown_event is not None
+        else _RUNNER_TUNNEL_CLOSE_TIMEOUT_S
+    )
     async with websockets.connect(
         tunnel_url,
         additional_headers=headers,
-        close_timeout=_RUNNER_TUNNEL_CLOSE_TIMEOUT_S,
+        close_timeout=close_timeout,
         max_size=RUNNER_TUNNEL_MAX_MESSAGE_BYTES,
         # Protocol keepalive aligned to the server's 90 s app-level budget (not the
         # 20 s library default that drops a busy-but-healthy tunnel — issue #1116).
@@ -558,18 +591,136 @@ async def _serve_tunnel_once(
         await _send_hello(ws.send, runner_version)
         _logger.info("runner %s connected to %s", runner_id, tunnel_url)
         try:
-            async for raw in ws:
-                await _handle_tunnel_frame(
-                    app,
-                    raw,
-                    ws.send,
-                    dispatch_tasks,
-                    ws_channels,
+            if shutdown_event is not None:
+                # Race recv against the shutdown event so an idle
+                # reaper can stop the tunnel promptly.
+                await _recv_loop_with_shutdown(
+                    app, ws, dispatch_tasks, ws_channels,
+                    shutdown_event=shutdown_event,
+                    on_graceful_shutdown=on_graceful_shutdown,
                     on_activity=on_activity,
                 )
+            else:
+                async for raw in ws:
+                    await _handle_tunnel_frame(
+                        app,
+                        raw,
+                        ws.send,
+                        dispatch_tasks,
+                        ws_channels,
+                        on_activity=on_activity,
+                    )
         finally:
             await _cancel_dispatch_tasks(dispatch_tasks)
             await _cancel_ws_channels(ws_channels)
+
+
+async def _recv_loop_with_shutdown(
+    app: _ASGIApp,
+    ws: Any,
+    dispatch_tasks: dict[str, asyncio.Task[None]],
+    ws_channels: dict[str, _RunnerWSChannel],
+    *,
+    shutdown_event: asyncio.Event,
+    on_graceful_shutdown: Callable[[], None] | None,
+    on_activity: Callable[[], None] | None,
+) -> None:
+    """Receive frames, racing each recv against *shutdown_event*.
+
+    When the event wins, in-flight dispatch tasks are drained (bounded)
+    and the function returns normally — the caller's ``finally`` block
+    cancels anything still outstanding.
+
+    Note: the frame that was being received when the event fired is
+    discarded (same-tick race). This is acceptable — the server will
+    re-deliver on the next tunnel connection if needed.
+    """
+    from websockets.exceptions import ConnectionClosedOK
+
+    while True:
+        recv_task = asyncio.create_task(ws.recv())
+        shutdown_waiter = asyncio.create_task(shutdown_event.wait())
+        done, _pending = await asyncio.wait(
+            {recv_task, shutdown_waiter},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if shutdown_waiter in done:
+            # Shutdown won the race. Cancel the pending recv and
+            # settle it so the WS library doesn't warn about an
+            # abandoned coroutine.
+            recv_task.cancel()
+            try:
+                await recv_task
+            except asyncio.CancelledError:
+                pass  # normal cancellation — expected path
+            except WebSocketException:
+                # Same-tick close that raced with our cancel — the
+                # connection was already closing; log and move on.
+                _logger.debug(
+                    "recv settled with WebSocketException during "
+                    "shutdown race",
+                    exc_info=True,
+                )
+            await _graceful_drain(
+                dispatch_tasks,
+                on_graceful_shutdown=on_graceful_shutdown,
+                timeout_s=_GRACEFUL_DRAIN_TIMEOUT_S,
+            )
+            return
+        # recv finished first — cancel the shutdown waiter and process.
+        shutdown_waiter.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await shutdown_waiter
+        try:
+            raw = recv_task.result()
+        except ConnectionClosedOK:
+            # Normal close — the server hung up cleanly.
+            return
+        await _handle_tunnel_frame(
+            app,
+            raw,
+            ws.send,
+            dispatch_tasks,
+            ws_channels,
+            on_activity=on_activity,
+        )
+
+
+async def _graceful_drain(
+    dispatch_tasks: dict[str, asyncio.Task[None]],
+    *,
+    on_graceful_shutdown: Callable[[], None] | None,
+    timeout_s: float,
+) -> None:
+    """Fire the shutdown hook and await in-flight dispatch tasks.
+
+    Tasks that do not finish within *timeout_s* are left running for
+    the caller's ``_cancel_dispatch_tasks()`` finally block — this
+    function must never hang indefinitely.
+
+    :param dispatch_tasks: Active request-id-to-task map.
+    :param on_graceful_shutdown: Optional sync callback (e.g.
+        ``app.state.drain_session_streams``). Exceptions are logged
+        but do not prevent the drain from completing.
+    :param timeout_s: Maximum seconds to wait for tasks to finish.
+    :returns: None.
+    """
+    if on_graceful_shutdown is not None:
+        try:
+            on_graceful_shutdown()
+        except Exception:
+            _logger.exception("on_graceful_shutdown hook failed")
+    pending = [t for t in dispatch_tasks.values() if not t.done()]
+    if not pending:
+        return
+    _done, still_pending = await asyncio.wait(pending, timeout=timeout_s)
+    if still_pending:
+        _logger.info(
+            "graceful drain: %d task(s) still running after %.1fs; "
+            "leaving them for forced cancellation",
+            len(still_pending),
+            timeout_s,
+        )
 
 
 async def _send_hello(
