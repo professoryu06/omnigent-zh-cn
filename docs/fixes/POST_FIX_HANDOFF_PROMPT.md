@@ -9,7 +9,11 @@
 
 ---
 
-## 当前快照（约 2026-07-23）
+## 当前快照（约 2026-07-24）
+
+**本轮 run id：** `fixrun-20260724-target-v0.6.0-zhcn.2-r05`
+**Gate1/2：** 仍未执行（需 Linux 环境实跑）
+**本轮核心：** r04 修复 Gate 脚本 P1 缺陷（`PIPESTATUS[0]` + 绝对 `$EVIDENCE_ROOT`）；r05 补全证据真实性 — `set +e` + `PIPESTATUS` 数组捕获 + `PYTEST_EXIT`/`TEE_EXIT` 双写 + INVALID 语义 + 统一 `*-fail-ids.txt` 命名 + `commits.txt` / `new-failures.txt` 生成步骤。Gate 1 / Gate 2 仍未实际执行。
 
 | PR | 主题 | 状态 |
 |----|------|------|
@@ -47,11 +51,12 @@
 
 ## TodoList（摘要）
 
-**A 门槛：** [ ] Linux 全仓（绝对全绿 **或** 相对 main 无新增失败） [ ] AgentCenter smoke  
-**A 合并：** [ ] #3 [ ] #4 [ ] #5 [ ] #2  
-**B 后续：** Phase2 apply；#2539/#2854/#2967  
-**C 上游：** #3013/#2833 仅跟踪  
-**D Scale：** 后置  
+**A 门槛：** [ ] Linux 全仓（绝对全绿 **或** 相对 main 无新增失败） [ ] AgentCenter smoke
+**A 合并：** [ ] #3 [ ] #4 [ ] #5 [ ] #2
+**B 后续：** Phase2 apply；#2539/#2854/#2967
+**C 上游：** #3013/#2833 仅跟踪
+**D Scale：** 后置
+**文档修复进度：** r01 ✅ → r02 ✅ → r03 ✅ → r04 ✅（Gate 脚本 P1 修复）→ **r05 ✅**（证据真实性补全）→ r06：真实跑 Gate1/Gate2
 
 ---
 

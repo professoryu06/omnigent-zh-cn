@@ -30,6 +30,27 @@ Generate the description from the actual diff and this session's context — lea
 with the motivation, then the change. Don't pass a `--body` that skips these
 sections.
 
+## Task completion report (mandatory)
+
+Every agent MUST deliver a structured report when finishing a task round.
+Four dimensions, in this order:
+
+1. **Completed tasks** — what was done this round, with evidence (test
+   results, file paths, RUN_IDs). One bullet per deliverable.
+2. **Handoff documents** — paths to every artifact the next agent needs
+   (task cards, plans, evidence roots, diagnosis docs). Use absolute
+   paths.
+3. **Next-agent prompt** — a ready-to-paste prompt for the relay agent
+   (Codex, Grok, or another Hermes session). Technical language, no
+   fluff. Include: role, worktree, what to read first, what to do,
+   constraints, success criteria, and what NOT to touch.
+4. **Watch-outs** — known pitfalls, pre-existing failures, environment
+   quirks, and anything that could trip up the next agent. Be specific
+   (file:line, error codes, PID numbers).
+
+Format: two-part report to the user (plain language), plus the
+technical prompt block for the next agent (can be terse / jargon-heavy).
+
 ## Code comments
 
 Keep comments short and focused on the code, not on the change history.

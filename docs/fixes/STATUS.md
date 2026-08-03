@@ -23,7 +23,14 @@
 
 **当前是否达到合并门槛：否。**
 
-证据目录约定：`artifacts/pre-merge/<run-id>/`（gitignore，不入库）。
+证据目录约定：`$EVIDENCE_ROOT`（即 `/tmp/omnigent-premerge-evidence/<run-id>/`，绝对路径，gitignore，不入库）。
+
+**最近文档修复轮次：** `fixrun-20260724-target-v0.6.0-zhcn.2-r05`
+- r04：修复 Gate 脚本 P1 缺陷（`echo EXIT:$?` → `PIPESTATUS[0]`；相对 `artifacts/` → 绝对 `$EVIDENCE_ROOT`）
+- r05：补全证据真实性 — pipeline `set +e` + `PIPESTATUS` 数组捕获 + `PYTEST_EXIT`/`TEE_EXIT` 双写 + INVALID 语义 + 统一 `*-fail-ids.txt` 命名 + `commits.txt` / `new-failures.txt` 生成步骤
+- Gate 1 / Gate 2 **仍未实际执行**（需 Linux 环境实跑）
+- 未 push；未 merge；未创建新 Tag；未声称 Gate PASS
+
 
 ---
 
@@ -53,7 +60,7 @@
 ### 可审计证据
 
 - 优先：各功能 PR 的 **test-first commit** + 上表 pytest
-- 门槛证据：`artifacts/pre-merge/<run-id>/` + 本表门槛行
+- 门槛证据：`$EVIDENCE_ROOT` + 本表门槛行
 - 本地 `artifacts/*` 默认不入库
 
 ## 未声称已合并
