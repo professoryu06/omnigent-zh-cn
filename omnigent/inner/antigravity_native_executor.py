@@ -83,6 +83,7 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.llms.errors import PermanentLLMError
 from omnigent.reasoning_effort import ANTIGRAVITY_EFFORTS, validate_effort_or_llm_error
 
@@ -215,8 +216,11 @@ class AntigravityNativeExecutor(Executor):
             latest user message is delivered.
         :param tools: Tool schemas from Omnigent. Ignored; native agy owns its
             own tool surface.
-        :param system_prompt: System prompt from the agent spec. Ignored; the
-            native conversation was created by the wrapper.
+        :param system_prompt: Agent system prompt from the agent spec. Phase-1 fail-loud only:
+            not applied to the native session (no session-creation/argv/stdin
+            delivery). A non-empty value logs a warning with chars=N only
+            (never the prompt body); when OMNIGENT_STRICT_PROMPT is enabled,
+            fails before user-message inject.
         :param config: Per-turn executor config. Only ``reasoning_effort`` is
             read; it is validated against :data:`ANTIGRAVITY_EFFORTS` and an
             unsupported value surfaces as a non-retryable error. The validated
@@ -225,6 +229,11 @@ class AntigravityNativeExecutor(Executor):
             this write path (see the module docstring).
         :returns: Async iterator yielding one terminal event.
         """
+        try:
+            note_native_system_prompt("antigravity-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt
         if config is not None:
             effort = (config.extra or {}).get("reasoning_effort")

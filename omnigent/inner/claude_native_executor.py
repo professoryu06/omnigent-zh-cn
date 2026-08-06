@@ -25,6 +25,7 @@ from omnigent.inner.executor import (
     TurnComplete,
 )
 from omnigent.inner.native_attachments import materialize_attachment
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 _logger = logging.getLogger(__name__)
 
@@ -112,14 +113,21 @@ class ClaudeNativeExecutor(Executor):
         :param tools: Tool schemas from Omnigent. Ignored here;
             Claude-native output/tool activity is terminal-originated
             and mirrored from Claude's transcript.
-        :param system_prompt: System prompt from the agent spec. The
-            native Claude Code terminal controls its own prompt/settings,
-            so this is ignored.
+        :param system_prompt: Agent system prompt from the agent spec. Phase-1 fail-loud only:
+            not applied to the native session (no session-creation/argv/stdin
+            delivery). A non-empty value logs a warning with chars=N only
+            (never the prompt body); when OMNIGENT_STRICT_PROMPT is enabled,
+            fails before user-message inject.
         :param config: Per-turn executor config. Unused by this
             terminal-backed executor.
         :yields: :class:`TurnComplete` after the input was injected,
             or :class:`ExecutorError` on bridge failure.
         """
+        try:
+            note_native_system_prompt("claude-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt, config
         if not _session_is_active(self._bridge_dir, self._request_session_id):
             yield ExecutorError(

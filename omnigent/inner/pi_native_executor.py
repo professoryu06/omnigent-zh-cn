@@ -17,6 +17,7 @@ from omnigent.inner.executor import (
     TurnComplete,
 )
 from omnigent.inner.native_attachments import materialize_attachment
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.pi_native_bridge import (
     PI_NATIVE_BRIDGE_DIR_ENV_VAR,
     PI_NATIVE_REQUEST_SESSION_ID_ENV_VAR,
@@ -86,12 +87,20 @@ class PiNativeExecutor(Executor):
         :param messages: Conversation history in executor message shape.
         :param tools: Tool schemas from Omnigent. Ignored for now; native
             Pi owns its configured tool surface.
-        :param system_prompt: System prompt from the agent spec. Ignored
-            because the native Pi terminal controls its own prompt/settings.
+        :param system_prompt: Agent system prompt from the agent spec. Phase-1 fail-loud only:
+            not applied to the native session (no session-creation/argv/stdin
+            delivery). A non-empty value logs a warning with chars=N only
+            (never the prompt body); when OMNIGENT_STRICT_PROMPT is enabled,
+            fails before user-message inject.
         :param config: Per-turn executor config. Unused.
         :yields: :class:`TurnComplete` after the input was queued, or an
             :class:`ExecutorError` when no user text can be sent.
         """
+        try:
+            note_native_system_prompt("pi-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt, config
         text = _latest_user_text(messages, self._bridge_dir)
         if not text:

@@ -32,6 +32,7 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.native_server_transport import NativePrompt, NativeServerTransport
 
 _logger = logging.getLogger(__name__)
@@ -123,11 +124,19 @@ class NativeServerHarness(Executor):
         :param messages: Conversation history; the latest user message is
             delivered.
         :param tools: Omnigent tool schemas (ignored — native owns tools).
-        :param system_prompt: Agent system prompt (ignored — set at
-            session creation).
+        :param system_prompt: Agent system prompt from the agent spec. Phase-1 fail-loud only:
+            not applied to the native session (no session-creation/argv/stdin
+            delivery). A non-empty value logs a warning with chars=N only
+            (never the prompt body); when OMNIGENT_STRICT_PROMPT is enabled,
+            fails before user-message inject.
         :param config: Per-turn config (model override applied if present).
         :returns: Async iterator yielding one terminal event.
         """
+        try:
+            note_native_system_prompt(self._harness_id, system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt
         prompt = _latest_user_prompt(messages, self._build_prompt)
         if prompt is None or prompt.is_empty():
