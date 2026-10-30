@@ -33,3 +33,16 @@
 - 不宣称 Gate 2 PASS、全仓 GREEN 或 mergeable。
 - Gate 2 仍需 Codex 另行验收；基线未冻结前禁止开始 Gate 2（现已冻结）。
 - 凭据全部 `[REDACTED]`。
+
+## Gate 2 验收记录（2026-08-03 追加）
+
+- **RUN_ID**：`20260803-232354-gate2-sixrounds-r5`（最终验收轮；前置作废轮 `20260803-223647-gate2-sixrounds-r1` / `-r2` / `-r3` / `20260803-231832-gate2-strict-r4` 均判定 INVALID，证据各自保留，未拼接）
+- **结论**：**GATE2_PASS**（六轮 C / E-pos / E-pos-strict / E-neg-warn / E-neg-strict / R 全部执行，AC-1~AC-6 全部满足）
+- **证据路径**：`C:\Users\Administrator\omnigent-diagnostics\20260803-232354-gate2-sixrounds-r5\`（runner 日志 ×6、receipt-e-pos.json / receipt-e-pos-strict.json、agent YAML ×6、verify 脚本 + verification ALL PASS）
+- **验收报告**：`docs/fixes/handoffs/GATE2_REVIEW_20260803-232354-gate2-sixrounds-r5.md`
+- **执行载体**：独立基线 stack（server `127.0.0.1:6868` + host-A + host-B(strict) + runner，全部来自 `F:\codex-ai\git项目部署\tmp\omnigent-review-gate2` @ `5c8b9ce96f7552d380276fe6de04651f2b19531a` 的 venv）；现网 6767 / omnigent-zh-next（PID 394481/361176/147181/363062/375662）未触碰
+- **GATE2_PASS 边界**：
+  - 仅 `codex-native` Phase 2 apply 实证送达（receipt：`harness_id=codex-native, channel=codex_home_config_toml, chars=52/66, sha256` 与 prompt 实测一致；private config 含 `developer_instructions` 键）
+  - `claude-native` 为 warn-only（能力矩阵 `NATIVE_PROMPT_CAPABILITY_MATRIX`），未声称送达；E-neg-warn 出现 `chars=52` fail-loud warning，E-neg-strict 在 `OMNIGENT_STRICT_PROMPT=1` 下注入前失败（exit 1，无模型回复）
+  - Gate 2 PASS **不等同**全仓 GREEN、不等同可 merge；merge 决定权专属 Codex（Controller）
+  - 本记录为文档记录，不构成 commit/push/merge/tag；凭据一律 `[REDACTED]`

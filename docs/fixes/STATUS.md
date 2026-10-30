@@ -18,7 +18,7 @@
 | 门槛 | 状态（时间快照） | 判定说明 |
 |------|------------------|----------|
 | Gate 1 Linux 全仓 pytest | **未执行 / 未达标** | 需 Ubuntu+py3.12+`uv sync --locked --extra dev`；优先绝对全绿，否则与 clean main 对比无**新增**失败。Windows 定向 67 **≠** 本门槛 |
-| Gate 2 AgentCenter C/E/R smoke | **未执行 / 未达标** | 需三角色配置与日志证据（隔离/harness/model/warn/strict）。**未伪造** |
+| Gate 2 AgentCenter C/E/R smoke | **PASS**（2026-08-03，RUN `20260803-232354-gate2-sixrounds-r5`） | 六轮 C/E-pos/E-pos-strict/E-neg-warn/E-neg-strict/R 全部执行，AC-1~AC-6 全部满足；证据：`docs/fixes/handoffs/GATE2_REVIEW_20260803-232354-gate2-sixrounds-r5.md` + `C:\Users\Administrator\omnigent-diagnostics\20260803-232354-gate2-sixrounds-r5\`。**边界：仅 codex-native Phase 2 apply 实证送达；claude-native 保持 warn；不等同全仓 GREEN 或可 merge；merge 决定权 Codex** |
 | 定向 67 + 目标 Ruff | **曾通过**（临时集成） | 3+7+57 passed；Ruff clean — **必要不充分** |
 
 **当前是否达到合并门槛：否。**
@@ -31,6 +31,15 @@
 - Commit 2（C 类文档 124 文件）：`c3c4ebad074ddce6b458c77dfe06e1ab76498e84`
 - 排除：`nul`（D 类清理卡）、`evidence/`（B 类 grok 卡）
 - **Gate 2 基线已冻结，等待 Codex 验收；基线冻结不改变"未达合并门槛"判定**
+
+### Gate 2 验收记录（2026-08-03）
+
+- **RUN_ID**：`20260803-232354-gate2-sixrounds-r5`（最终验收轮；前置作废轮 r1/r2/r3/r4 见各自证据目录）
+- **结论**：**GATE2_PASS**（六轮 C/E-pos/E-pos-strict/E-neg-warn/E-neg-strict/R，AC-1~AC-6 全部满足）
+- **证据路径**：`C:\Users\Administrator\omnigent-diagnostics\20260803-232354-gate2-sixrounds-r5\`（runner 日志 ×6、receipt ×2、agent YAML ×6、验证链 ALL PASS）
+- **验收报告**：`docs/fixes/handoffs/GATE2_REVIEW_20260803-232354-gate2-sixrounds-r5.md`
+- **执行载体**：独立基线 stack（server 6868 + host×2 + runner，全部 `omnigent-review-gate2` @ `5c8b9ce` venv）；现网 6767/omnigent-zh-next 未触碰
+- **GATE2_PASS 边界**：仅 codex-native Phase 2 apply 实证送达（receipt 机制）；claude-native 为 warn-only 未声称送达；Gate 2 PASS 不等同全仓 GREEN 或可 merge；merge 决定权专属 Codex
 
 证据目录约定：`$EVIDENCE_ROOT`（即 `/tmp/omnigent-premerge-evidence/<run-id>/`，绝对路径，gitignore，不入库）。
 
