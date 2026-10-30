@@ -2705,26 +2705,122 @@ async def test_codex_cli_version_times_out_and_kills_proc(
 # Function-based (the project standard); the TestCase class above predates it.
 
 
-def test_model_provider_override_appends_pin() -> None:
-    """The override becomes exactly one ``-c model_provider=...`` fragment.
+_CODEX_PROXY_ENV_NAMES = (
+    "OMNIGENT_CODEX_PROXY",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+)
+
+
+def _isolate_codex_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear host/ambient proxy vars so Codex proxy assertions are host-independent."""
+    for name in _CODEX_PROXY_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_model_provider_override_appends_pin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Custom provider pin is exactly one ``-c model_provider=...`` fragment.
 
     json.dumps quoting yields a valid TOML basic string. Failure means an
-    adopted cli-config provider (or the subscription's openai pin) never
-    reaches the codex CLI, so the bridged config.toml's default provider
-    silently routes the session instead.
+    adopted cli-config provider never reaches the codex CLI, so the
+    bridged config.toml's default provider silently routes the session
+    instead. Custom providers must not inherit subscription proxy
+    overrides (those belong only to the OpenAI subscription route).
     """
+    _isolate_codex_proxy_env(monkeypatch)
     with patch("omnigent.inner.codex_executor._find_codex_cli", return_value="/usr/bin/codex"):
         executor = CodexExecutor(model_provider_override="Databricks")
     assert executor._codex_config_overrides == ['model_provider="Databricks"']
+    assert "features.network_proxy=true" not in executor._codex_config_overrides
+    assert not any(
+        override.startswith("network_proxy.proxy_url=")
+        for override in executor._codex_config_overrides
+    )
+    assert "HTTPS_PROXY" not in executor._env
+    assert "HTTP_PROXY" not in executor._env
+    assert "ALL_PROXY" not in executor._env
 
 
-def test_model_provider_override_with_gateway_raises() -> None:
+def test_custom_provider_strips_ambient_host_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ambient host HTTP(S)_PROXY / NO_PROXY must not ride into a custom child.
+
+    WSL full-suite shells often inject a host-side proxy plus
+    ``NO_PROXY=...,172.31.80.1``. Custom pins are not the subscription
+    route, so ambient proxy env must be stripped and subscription
+    network_proxy overrides must stay absent.
+    """
+    _isolate_codex_proxy_env(monkeypatch)
+    monkeypatch.setenv("HTTP_PROXY", "http://172.31.80.1:17892")
+    monkeypatch.setenv("HTTPS_PROXY", "http://172.31.80.1:17892")
+    monkeypatch.setenv("ALL_PROXY", "http://172.31.80.1:17892")
+    monkeypatch.setenv("http_proxy", "http://172.31.80.1:17892")
+    monkeypatch.setenv("https_proxy", "http://172.31.80.1:17892")
+    monkeypatch.setenv("all_proxy", "http://172.31.80.1:17892")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1,172.31.80.1")
+    monkeypatch.setenv("no_proxy", "172.31.80.1")
+    with patch("omnigent.inner.codex_executor._find_codex_cli", return_value="/usr/bin/codex"):
+        executor = CodexExecutor(model_provider_override="Databricks", codex_path="/usr/bin/codex")
+    assert executor._codex_config_overrides == ['model_provider="Databricks"']
+    assert "features.network_proxy=true" not in executor._codex_config_overrides
+    assert not any(
+        override.startswith("network_proxy.proxy_url=")
+        for override in executor._codex_config_overrides
+    )
+    for key in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ):
+        assert key not in executor._env
+    assert "172.31.80.1" not in repr(executor._env)
+
+
+def test_openai_model_provider_pin_keeps_subscription_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit ``openai`` pin is still the subscription route and keeps proxy."""
+    _isolate_codex_proxy_env(monkeypatch)
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1,172.31.80.1")
+    with patch("omnigent.inner.codex_executor._find_codex_cli", return_value="/usr/bin/codex"):
+        executor = CodexExecutor(model_provider_override="openai", codex_path="/usr/bin/codex")
+    assert "features.network_proxy=true" in executor._codex_config_overrides
+    assert any(
+        override.startswith("network_proxy.proxy_url=")
+        for override in executor._codex_config_overrides
+    )
+    assert 'model_provider="openai"' in executor._codex_config_overrides
+    assert executor._env.get("HTTPS_PROXY") == "http://127.0.0.1:7897"
+    assert set(executor._env["NO_PROXY"].split(",")) == {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }
+    assert "172.31.80.1" not in repr(executor._env)
+
+
+def test_model_provider_override_with_gateway_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """gateway=True and model_provider_override are mutually exclusive.
 
     Both write ``model_provider`` into the -c overrides; last-one-wins
     would silently drop the gateway transport. Failure (no exception)
     means a misconfigured AP producer ships an ambiguous launch.
     """
+    _isolate_codex_proxy_env(monkeypatch)
     with (
         patch("omnigent.inner.codex_executor._find_codex_cli", return_value="/usr/bin/codex"),
         pytest.raises(OSError, match="mutually exclusive"),

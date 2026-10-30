@@ -257,9 +257,11 @@ class TestSubscriptionProxyRoute:
         assert "features.network_proxy=true" in executor._codex_config_overrides
         assert 'network_proxy.proxy_url="http://127.0.0.1:7897"' in executor._codex_config_overrides
         assert set(executor._env["NO_PROXY"].split(",")) == {
-            "127.0.0.1",
             "localhost",
+            "127.0.0.1",
+            "::1",
         }
+        assert "no_proxy" not in executor._env
 
     def test_proxy_can_be_overridden_without_ambient_proxy_leak(
         self, monkeypatch: pytest.MonkeyPatch
@@ -267,6 +269,9 @@ class TestSubscriptionProxyRoute:
         monkeypatch.setenv("OMNIGENT_CODEX_PROXY", "socks5h://127.0.0.1:7897")
         monkeypatch.setenv("HTTP_PROXY", "http://ambient.invalid:1")
         monkeypatch.setenv("ALL_PROXY", "socks5://ambient.invalid:2")
+        # Ambient NO_PROXY (WSL host-proxy IP) must be replaced, not merged.
+        monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1,172.31.80.1")
+        monkeypatch.setenv("no_proxy", "172.31.80.1")
         executor = CodexExecutor(
             model="gpt-5.6-sol",
             codex_path="/fake/codex",
@@ -274,8 +279,14 @@ class TestSubscriptionProxyRoute:
         )
         assert executor._env["HTTPS_PROXY"] == "socks5h://127.0.0.1:7897"
         assert "ambient.invalid" not in repr(executor._env)
+        assert "172.31.80.1" not in repr(executor._env)
         assert executor._env["HTTP_PROXY"] == "socks5h://127.0.0.1:7897"
         assert executor._env["ALL_PROXY"] == "socks5h://127.0.0.1:7897"
+        assert set(executor._env["NO_PROXY"].split(",")) == {
+            "localhost",
+            "127.0.0.1",
+            "::1",
+        }
         assert "features.network_proxy=true" in executor._codex_config_overrides
         assert 'network_proxy.proxy_url="socks5h://127.0.0.1:7897"' in executor._codex_config_overrides
 
@@ -291,8 +302,23 @@ class TestSubscriptionProxyRoute:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("OMNIGENT_CODEX_PROXY", raising=False)
-        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        for name in (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+        ):
             monkeypatch.delenv(name, raising=False)
+        # Ambient host proxy + NO_PROXY must be stripped on the gateway path.
+        monkeypatch.setenv("HTTP_PROXY", "http://ambient.invalid:1")
+        monkeypatch.setenv("HTTPS_PROXY", "http://ambient.invalid:1")
+        monkeypatch.setenv("http_proxy", "http://ambient.invalid:1")
+        monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1,172.31.80.1")
+        monkeypatch.setenv("no_proxy", "172.31.80.1")
         executor = CodexExecutor(
             model="gpt-5.6-sol",
             codex_path="/fake/codex",
@@ -302,10 +328,99 @@ class TestSubscriptionProxyRoute:
             gateway_auth_command="printf %s fake-token",
         )
         assert "HTTPS_PROXY" not in executor._env
+        assert "HTTP_PROXY" not in executor._env
+        assert "NO_PROXY" not in executor._env
+        assert "no_proxy" not in executor._env
+        assert "ambient.invalid" not in repr(executor._env)
+        assert "172.31.80.1" not in repr(executor._env)
+        assert "features.network_proxy=true" not in executor._codex_config_overrides
         assert not any(
-            override.startswith("network.proxy_url=")
+            override.startswith("network_proxy.proxy_url=")
+            or override.startswith("network.proxy_url=")
             for override in executor._codex_config_overrides
         )
+
+    def test_custom_model_provider_does_not_inherit_subscription_proxy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Databricks/custom cli-config pins must not inherit subscription proxy."""
+        monkeypatch.delenv("OMNIGENT_CODEX_PROXY", raising=False)
+        for name in (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        # Host-transmitted ambient proxy (WSL full-suite case) must not
+        # reappear as either env or subscription network_proxy overrides.
+        monkeypatch.setenv("HTTP_PROXY", "http://172.31.80.1:17892")
+        monkeypatch.setenv("HTTPS_PROXY", "http://172.31.80.1:17892")
+        monkeypatch.setenv("ALL_PROXY", "http://172.31.80.1:17892")
+        monkeypatch.setenv("http_proxy", "http://172.31.80.1:17892")
+        monkeypatch.setenv("https_proxy", "http://172.31.80.1:17892")
+        monkeypatch.setenv("all_proxy", "http://172.31.80.1:17892")
+        monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1,172.31.80.1")
+        monkeypatch.setenv("no_proxy", "172.31.80.1")
+        executor = CodexExecutor(
+            codex_path="/fake/codex",
+            gateway=False,
+            model_provider_override="Databricks",
+        )
+        assert executor._codex_config_overrides == ['model_provider="Databricks"']
+        assert "HTTPS_PROXY" not in executor._env
+        assert "HTTP_PROXY" not in executor._env
+        assert "ALL_PROXY" not in executor._env
+        assert "http_proxy" not in executor._env
+        assert "https_proxy" not in executor._env
+        assert "all_proxy" not in executor._env
+        assert "NO_PROXY" not in executor._env
+        assert "no_proxy" not in executor._env
+        assert "172.31.80.1" not in repr(executor._env)
+        assert "features.network_proxy=true" not in executor._codex_config_overrides
+        assert not any(
+            override.startswith("network_proxy.proxy_url=")
+            for override in executor._codex_config_overrides
+        )
+
+    def test_openai_provider_pin_still_uses_subscription_proxy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("OMNIGENT_CODEX_PROXY", raising=False)
+        for name in (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        # Ambient NO_PROXY host IP must not survive the openai pin path.
+        monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1,172.31.80.1")
+        executor = CodexExecutor(
+            codex_path="/fake/codex",
+            gateway=False,
+            model_provider_override="openai",
+        )
+        assert executor._env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
+        assert "features.network_proxy=true" in executor._codex_config_overrides
+        assert 'network_proxy.proxy_url="http://127.0.0.1:7897"' in (
+            executor._codex_config_overrides
+        )
+        assert 'model_provider="openai"' in executor._codex_config_overrides
+        assert set(executor._env["NO_PROXY"].split(",")) == {
+            "localhost",
+            "127.0.0.1",
+            "::1",
+        }
+        assert "172.31.80.1" not in repr(executor._env)
 
 
 # ---------------------------------------------------------------------------

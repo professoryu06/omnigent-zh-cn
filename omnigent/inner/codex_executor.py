@@ -152,6 +152,8 @@ _CODEX_CONFIG_FORBIDDEN_ENDPOINT = "127.0.0.1:10100"
 _CODEX_PROXY_ENV_VAR = "OMNIGENT_CODEX_PROXY"
 _CODEX_DEFAULT_PROXY = "http://127.0.0.1:7897"
 _CODEX_PROXY_SCHEMES = frozenset({"http", "https", "socks5", "socks5h"})
+# Conventional proxy *and* no-proxy names (both cases). WSL/host shells
+# often inject ambient values that must never ride into a Codex child.
 _CODEX_PROXY_ENV_KEYS = (
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -160,7 +162,26 @@ _CODEX_PROXY_ENV_KEYS = (
     "https_proxy",
     "all_proxy",
 )
-_CODEX_LOCAL_NO_PROXY = ("127.0.0.1", "localhost")
+_CODEX_NO_PROXY_ENV_KEYS = (
+    "NO_PROXY",
+    "no_proxy",
+)
+# Product loopback allowlist only — never merge ambient host entries
+# (e.g. WSL host proxy IP 172.31.80.1) into the child NO_PROXY.
+_CODEX_LOCAL_NO_PROXY = ("localhost", "127.0.0.1", "::1")
+
+
+def _strip_ambient_proxy_env(env: dict[str, str]) -> None:
+    """Drop ambient host proxy / no-proxy vars from a Codex child env.
+
+    Covers both letter-cases of the conventional names. Used for every
+    non-subscription route, and as the first step of the subscription
+    route before a controlled proxy is re-installed.
+    """
+    for key in _CODEX_PROXY_ENV_KEYS:
+        env.pop(key, None)
+    for key in _CODEX_NO_PROXY_ENV_KEYS:
+        env.pop(key, None)
 
 
 def _resolve_codex_proxy() -> str:
@@ -196,9 +217,14 @@ def _resolve_codex_proxy() -> str:
 
 
 def _configure_codex_subscription_proxy(env: dict[str, str]) -> str:
-    """Install an explicit proxy route for a subscription Codex child."""
-    for key in _CODEX_PROXY_ENV_KEYS:
-        env.pop(key, None)
+    """Install an explicit proxy route for a subscription Codex child.
+
+    Ambient host proxy/no-proxy values are discarded first. The child
+    then receives only the controlled subscription proxy and a product
+    loopback ``NO_PROXY`` list (``localhost``, ``127.0.0.1``, ``::1``) —
+    never host-proxy IPs such as a WSL ``172.31.80.1`` entry.
+    """
+    _strip_ambient_proxy_env(env)
     proxy = _resolve_codex_proxy()
     # Different Rust HTTP/WebSocket layers consult different conventional
     # proxy names. Set the same explicit route for all of them so a child
@@ -206,15 +232,9 @@ def _configure_codex_subscription_proxy(env: dict[str, str]) -> str:
     # conflicting proxy.
     for key in _CODEX_PROXY_ENV_KEYS:
         env[key] = proxy
-    existing_no_proxy = [
-        item.strip()
-        for item in env.get("NO_PROXY", "").split(",")
-        if item.strip()
-    ]
-    for local_host in _CODEX_LOCAL_NO_PROXY:
-        if local_host not in existing_no_proxy:
-            existing_no_proxy.append(local_host)
-    env["NO_PROXY"] = ",".join(existing_no_proxy)
+    # Replace (do not merge) ambient NO_PROXY so host proxy IPs cannot
+    # survive into the Codex child.
+    env["NO_PROXY"] = ",".join(_CODEX_LOCAL_NO_PROXY)
     return proxy
 
 
@@ -2299,19 +2319,6 @@ class CodexExecutor(Executor):
         self._retry_policy = retry_policy if retry_policy is not None else RetryPolicy()
         self._env.update(self._retry_policy.codex_cli.env())
         self._codex_config_overrides: list[str] = []
-        # Subscription mode uses the Meta-compatible local proxy on the
-        # Codex child only. Codex 0.146.0's network-proxy feature also needs
-        # an explicit config override: ``network.proxy_url`` is not a valid
-        # 0.146.0 key, while ``features.network_proxy`` and
-        # ``network_proxy.proxy_url`` are.
-        if not gateway:
-            proxy = _configure_codex_subscription_proxy(self._env)
-            self._codex_config_overrides.extend(
-                [
-                    "features.network_proxy=true",
-                    f"network_proxy.proxy_url={json.dumps(proxy)}",
-                ]
-            )
         if model_provider_override is not None and gateway:
             # Both would fight over model_provider in the -c overrides; the
             # AP producer must emit exactly one routing mechanism.
@@ -2320,6 +2327,33 @@ class CodexExecutor(Executor):
                 "model_provider_override; these routing mechanisms are "
                 "mutually exclusive."
             )
+        # Subscription mode (default OpenAI subscription auth, or an
+        # explicit ``openai`` pin) uses the Meta-compatible local proxy
+        # on the Codex child only. Custom ``model_provider`` pins
+        # (e.g. Databricks tables from the user's ``~/.codex/config.toml``)
+        # and gateway transports own their own routing and must not
+        # inherit the subscription proxy — including ambient host
+        # ``HTTP(S)_PROXY`` leaked through ``_clean_codex_env`` (common
+        # on WSL with a host-side proxy). Codex 0.146.0's network-proxy
+        # feature also needs an explicit config override:
+        # ``network.proxy_url`` is not a valid 0.146.0 key, while
+        # ``features.network_proxy`` and ``network_proxy.proxy_url`` are.
+        _uses_subscription_proxy = not gateway and (
+            model_provider_override is None or model_provider_override == "openai"
+        )
+        if _uses_subscription_proxy:
+            proxy = _configure_codex_subscription_proxy(self._env)
+            self._codex_config_overrides.extend(
+                [
+                    "features.network_proxy=true",
+                    f"network_proxy.proxy_url={json.dumps(proxy)}",
+                ]
+            )
+        else:
+            # Drop ambient host proxy *and* no-proxy vars so custom /
+            # gateway children cannot inherit a subscription-oriented
+            # route or a WSL host-proxy IP (e.g. 172.31.80.1 in NO_PROXY).
+            _strip_ambient_proxy_env(self._env)
         if model_provider_override is not None:
             # Pin the provider by name. json.dumps yields a valid TOML basic
             # string (proper quoting/escaping) for the -c override value.

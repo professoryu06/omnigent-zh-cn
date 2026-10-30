@@ -192,6 +192,8 @@ async def _serve_one_launch(
     launch_status: str,
     launch_error: str | None = None,
     launch_error_code: str | None = None,
+    overall_timeout_s: float = 30.0,
+    poll_timeout_s: float = 1.0,
 ) -> HostLaunchRunnerFrame:
     """Answer the host round-trips for a single inline session launch.
 
@@ -202,6 +204,11 @@ async def _serve_one_launch(
     (echoing the requested path as the canonical path) and replies
     with ``launch_status`` to the launch, then returns.
 
+    Polling uses short ``receive_output`` slices under a finite overall
+    deadline so a quiet gap under suite load (asgiref's per-call
+    timeout) cannot fail the barrier before the launch frame arrives.
+    This is event-driven completion, not a blind sleep.
+
     :param comm: The connected host communicator.
     :param launch_status: ``"launched"`` or ``"failed"`` — the status
         the fake host reports for the launch.
@@ -210,13 +217,27 @@ async def _serve_one_launch(
     :param launch_error_code: Structured failure category to attach,
         e.g. ``"harness_not_configured"``; ``None`` reports an
         uncategorized failure (legacy host behavior).
+    :param overall_timeout_s: Wall-clock budget for the whole wait,
+        e.g. ``30.0``.
+    :param poll_timeout_s: Per-receive slice, e.g. ``1.0``; quiet
+        slices continue until *overall_timeout_s* is exhausted.
     :returns: The ``host.launch_runner`` frame the server sent, so
         callers can assert on its fields (e.g. ``harness``).
     """
-    # Bounded so a routing bug can't hang the test: stat + launch are
-    # 2 frames, the rest of the budget absorbs interleaved pings.
-    for _ in range(40):
-        output = await comm.receive_output(timeout=3.0)
+    deadline = time.monotonic() + overall_timeout_s
+    frames_budget = 40
+    while frames_budget > 0 and time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            output = await comm.receive_output(
+                timeout=min(poll_timeout_s, max(0.05, remaining))
+            )
+        except asyncio.TimeoutError:
+            # Quiet slice under suite load — keep waiting for the frame.
+            continue
+        frames_budget -= 1
         if output["type"] != "websocket.send":
             continue
         frame = decode_host_frame(output["text"])
@@ -875,23 +896,117 @@ async def test_host_session_message_relaunches_offline_runner(
     so the server routes to the new runner, not the dead one.
 
     Mutation check: drop the relaunch branch (or its ``conv.host_id`` arm)
-    in ``post_event`` and no launch frame is sent — ``_wait_for_launch``
-    returns ``None`` and the first assertion fails. Make ``replace_runner_id``
-    a no-op and the runner_id-rotation assertion fails.
+    in ``post_event`` and ``launch_triggered`` never fires. Make
+    ``replace_runner_id`` a no-op and the runner_id-rotation assertion fails.
+
+    Synchronization (full-suite load): do not rely on grace=0 alone or a
+    single asgiref ``receive_output`` budget. Observe three independent
+    signals without blind sleep:
+
+    1. **triggered** — production entered ``_launch_runner_on_host``
+       (asyncio.Event wrapper);
+    2. **frame observed** — host tunnel saw ``host.launch_runner`` and
+       ACKed it (concurrent ``_serve_one_launch`` with overall budget);
+    3. **state** — conversation ``runner_id`` rotated after replace.
+
+    ``_get_runner_client`` and ``_wait_for_runner_client`` are forced
+    offline so grace/connect waits cannot stall the path under suite load
+    or mask a missed relaunch.
     """
-    from omnigent.runtime import set_runner_client
     from omnigent.server.routes import sessions as sessions_module
 
+    # Grace/connect waits must not block offline relaunch observation.
+    # Patch the wait helper itself so a missed grace monkeypatch (or a
+    # 3.0s full-suite log line) cannot re-introduce a quiet gap.
     monkeypatch.setattr(sessions_module, "_HOST_BOUND_RUNNER_CONNECT_GRACE_S", 0.0)
+    monkeypatch.setattr(sessions_module, "_HOST_RELAUNCH_RUNNER_CONNECT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(sessions_module, "_HOST_LAUNCH_RESULT_TIMEOUT_S", 5.0)
+
+    async def _always_offline_runner_client(
+        sid: str, router: object
+    ) -> httpx.AsyncClient | None:
+        """Force the offline branch; do not depend on global runner state.
+
+        :param sid: Session id being routed (unused).
+        :param router: Real app runner router (unused).
+        :returns: ``None`` so post_event takes the host relaunch path.
+        """
+        del sid, router
+        return None
+
+    async def _never_wait_for_runner_client(*args: Any, **kwargs: Any) -> None:
+        """Skip grace/connect waits — runner stays offline for this test.
+
+        :param args: Positional args from ``_wait_for_runner_client``.
+        :param kwargs: Keyword args from ``_wait_for_runner_client``.
+        :returns: ``None`` immediately (event-driven short-circuit).
+        """
+        del args, kwargs
+        return None
+
+    monkeypatch.setattr(
+        sessions_module, "_get_runner_client", _always_offline_runner_client
+    )
+    monkeypatch.setattr(
+        sessions_module, "_wait_for_runner_client", _never_wait_for_runner_client
+    )
 
     comm = await _connect_host(app)
     session = await _inline_launch_session(client, comm)
     session_id = session["id"]
     original_runner_id = session["runner_id"]
 
-    # Runner offline (no runner client resolves) and the session was never
-    # stopped: the message path must take the host-relaunch branch.
-    set_runner_client(None)
+    # --- Signal 1: production entered _launch_runner_on_host ---
+    launch_triggered = asyncio.Event()
+    launch_finished = asyncio.Event()
+    _orig_launch = sessions_module._launch_runner_on_host
+
+    async def _tracked_launch_runner_on_host(*args: Any, **kwargs: Any) -> Any:
+        """Wrap production launch: mark triggered before the real work.
+
+        :param args: Forwarded to ``_launch_runner_on_host``.
+        :param kwargs: Forwarded to ``_launch_runner_on_host``.
+        :returns: The real ``_HostLaunchAttempt``.
+        """
+        launch_triggered.set()
+        try:
+            return await _orig_launch(*args, **kwargs)
+        finally:
+            launch_finished.set()
+
+    monkeypatch.setattr(
+        sessions_module, "_launch_runner_on_host", _tracked_launch_runner_on_host
+    )
+
+    # --- Signal 2: host tunnel observed + ACKed host.launch_runner ---
+    frame_holder: dict[str, Any] = {"frame": None, "error": None}
+    frame_seen = asyncio.Event()
+
+    async def _relaunch_frame_barrier() -> HostLaunchRunnerFrame:
+        """Receive and ACK the relaunch launch frame on the host tunnel.
+
+        :returns: The ``HostLaunchRunnerFrame`` the server sent.
+        """
+        try:
+            frame = await _serve_one_launch(
+                comm,
+                launch_status="launched",
+                overall_timeout_s=20.0,
+                poll_timeout_s=0.5,
+            )
+            frame_holder["frame"] = frame
+            return frame
+        except Exception as exc:  # noqa: BLE001 — surface in assertion text
+            frame_holder["error"] = exc
+            raise
+        finally:
+            frame_seen.set()
+
+    frame_task = asyncio.create_task(_relaunch_frame_barrier())
+    # Ensure the host-side receiver is scheduled before the message POST so
+    # the launch frame cannot be dropped into an unattended queue gap.
+    await asyncio.sleep(0)
+
     post_task = asyncio.create_task(
         client.post(
             f"/v1/sessions/{session_id}/events",
@@ -905,23 +1020,44 @@ async def test_host_session_message_relaunches_offline_runner(
         )
     )
     try:
-        # The launch frame is sent (and the runner_id rotated) before the
-        # route's 30s wait-for-runner loop, so a small budget suffices;
-        # None means no relaunch fired.
-        launch_frame = await _wait_for_launch(comm, budget_s=5.0)
+        # Wait for production trigger first (cheap, independent of asgiref).
+        try:
+            await asyncio.wait_for(launch_triggered.wait(), timeout=15.0)
+        except asyncio.TimeoutError:
+            pass
+        # Then wait for the host frame ACK (or its overall budget).
+        try:
+            await asyncio.wait_for(frame_seen.wait(), timeout=20.0)
+        except asyncio.TimeoutError:
+            pass
+        # Prefer the finished launch path so replace_runner_id is durable.
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(launch_finished.wait(), timeout=5.0)
+
+        launch_frame = (
+            frame_holder["frame"]
+            if isinstance(frame_holder["frame"], HostLaunchRunnerFrame)
+            else None
+        )
     finally:
-        # We never connect a runner, so the route would otherwise block
-        # ~30s in its wait loop. Cancel now that we've observed (or missed)
-        # the relaunch — the rotation + frame send already happened
-        # synchronously, so the assertions below remain valid.
         post_task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await post_task
+        if not frame_task.done():
+            frame_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await frame_task
 
+    assert launch_triggered.is_set(), (
+        "a message to a host-bound, runner-offline, non-stopped session must "
+        "enter _launch_runner_on_host (relaunch triggered); production never "
+        "called the launch helper — offline path did not fire"
+    )
     assert launch_frame is not None, (
         "a message to a host-bound, runner-offline, non-stopped session must "
-        "trigger host.launch_runner so the host can re-spawn a runner; none "
-        "arrived — the relaunch branch in post_event did not fire"
+        "send host.launch_runner so the host can re-spawn a runner; launch was "
+        f"triggered but no frame arrived on the host tunnel "
+        f"(barrier error: {frame_holder['error']!r})"
     )
     # Relaunch forwards the session's canonical workspace (not garbage),
     # proving it read the persisted workspace off the conversation row.
