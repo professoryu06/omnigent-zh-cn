@@ -8629,12 +8629,6 @@ def create_runner_app(
         """
         if session_id not in _session_workspace_cache:
             snapshot = await _session_snapshot(session_id)
-            # Only memoize a successful snapshot. A failed GET leaves
-            # workspace unresolved so a later read can re-fetch once the
-            # server is reachable — matching ``_session_snapshot`` itself,
-            # which refuses to cache incomplete/failed snapshots.
-            if not snapshot.ok:
-                return None
             _session_workspace_cache[session_id] = snapshot.workspace
         return _session_workspace_cache.get(session_id)
 
@@ -17357,20 +17351,10 @@ def create_runner_app(
         :returns: None.
         """
         if session_id in _session_start_cache:
-            # Start time may already be latched from a prior attempt; still
-            # allow a later successful snapshot to fill workspace projection
-            # when it was never memoized (or was cleared by agent-cache reset).
-            if session_id not in _session_workspace_cache:
-                snapshot = await _session_snapshot(session_id)
-                if snapshot.ok:
-                    _session_workspace_cache[session_id] = snapshot.workspace
             return
         snapshot = await _session_snapshot(session_id)
         _session_start_cache[session_id] = snapshot.created_at
-        # Do not cache workspace from a failed snapshot (workspace=None would
-        # permanently pin harness/filesystem resolution to the runner global).
-        if snapshot.ok:
-            _session_workspace_cache[session_id] = snapshot.workspace
+        _session_workspace_cache[session_id] = snapshot.workspace
 
     async def _resolve_session_spec_entry(session_id: str) -> Any | None:
         """
@@ -17957,17 +17941,12 @@ def create_runner_app(
         )
 
     def _clear_session_agent_caches(session_id: str, agent_id: str | None = None) -> None:
-        """Drop cached spec/tool/workspace data derived from a session's agent."""
+        """Drop cached spec/tool data derived from a session's agent bundle."""
         _session_spec_cache.pop(session_id, None)
         _session_skills_cache.pop(session_id, None)
         _session_tool_schemas.pop(session_id, None)
         _session_mcp_spec_hash.pop(session_id, None)
         _session_snapshot_cache.pop(session_id, None)
-        # Workspace projection + per-session filesystem registry must go
-        # too: a poisoned or stale worktree path cannot be repaired by
-        # clearing only the agent-spec half of the cache.
-        _session_workspace_cache.pop(session_id, None)
-        _session_fs_registries.pop(session_id, None)
         if agent_id:
             _spec_cache.pop(agent_id, None)
 
