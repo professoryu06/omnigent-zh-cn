@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, TypeAlias
 
+import tomlkit
+
 from omnigent.llms._usage_observer import notify_from_dict as _notify_usage_from_dict
 from omnigent.reasoning_effort import CODEX_EFFORTS, validate_effort
 from omnigent.runner.identity import OMNIGENT_SESSION_ENV_VAR
@@ -121,7 +123,56 @@ _CODEX_HOME_COPY_FILES = ("config.toml",)
 # when their prefix is in the allowlist. ``OPENAI_API_KEY`` is stripped so
 # the codex CLI uses its subscription auth (``auth.json``) rather than a
 # developer API key that would charge separately.
-_CODEX_ENV_DENY_EXACT: frozenset[str] = frozenset({"OPENAI_API_KEY"})
+_CODEX_ENV_DENY_EXACT: frozenset[str] = frozenset({
+    "OPENAI_API_KEY",
+    # Third-party tools (e.g. OpenCodex) inject these to reroute the
+    # Codex CLI through a local proxy.  Omnigent must never inherit them.
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+})
+
+# Top-level config.toml keys that third-party tools (OpenCodex, etc.)
+# inject to reroute the Codex CLI's provider endpoint or override the
+# model.  These are stripped from the private per-session config copy so
+# the CLI falls back to its built-in subscription provider.
+_CODEX_CONFIG_POLLUTION_KEYS: frozenset[str] = frozenset({
+    "openai_base_url",
+    "openai_api_base",
+    "model",
+})
+
+# Loopback endpoint pattern that must never survive config sanitisation.
+_CODEX_CONFIG_FORBIDDEN_ENDPOINT = "127.0.0.1:10100"
+
+
+def _sanitise_codex_config(source_text: str) -> str:
+    """Return a cleaned copy of a Codex ``config.toml`` for Omnigent sessions.
+
+    Strips third-party provider routing (``openai_base_url``,
+    ``openai_api_base``) and user model overrides (``model``) so the
+    Codex CLI uses its built-in subscription provider.  Safe fields
+    (``model_reasoning_effort``, ``[features]``, ``[desktop]``, etc.)
+    are preserved.  The cleaned TOML is re-validated: if any string
+    value still references the forbidden loopback endpoint the function
+    raises rather than silently continuing.
+
+    :param source_text: Raw ``config.toml`` content from the user's
+        ``CODEX_HOME``.
+    :returns: Sanitised TOML text.
+    :raises OSError: If the sanitised config still contains a forbidden
+        endpoint after cleaning.
+    """
+    doc = tomlkit.parse(source_text)
+    for key in _CODEX_CONFIG_POLLUTION_KEYS:
+        doc.pop(key, None)
+    result = tomlkit.dumps(doc)
+    if _CODEX_CONFIG_FORBIDDEN_ENDPOINT in result:
+        raise OSError(
+            f"Codex config sanitisation failed: forbidden endpoint "
+            f"{_CODEX_CONFIG_FORBIDDEN_ENDPOINT!r} still present after "
+            f"stripping pollution keys. Refusing to start."
+        )
+    return result
 
 
 def _extract_codex_last_turn_usage(params: object) -> dict[str, int] | None:
@@ -692,10 +743,13 @@ def _populate_codex_home_config(target_dir: Path, source_dir: Path) -> None:
 
     - ``auth.json`` is **symlinked** so OAuth token refreshes written to
       the real home propagate to running sessions without delay.
-    - ``config.toml`` is **copied** so an in-TUI ``/model`` command writes
-      only to the session's own private copy and never mutates the shared
-      ``~/.codex/config.toml``. This keeps model selection and cost-policy
-      enforcement isolated between concurrent sessions.
+    - ``config.toml`` is **sanitised and copied** so third-party provider
+      routing (``openai_base_url``, ``openai_api_base``) and user model
+      overrides are stripped before the Codex CLI reads them.  This
+      prevents tools like OpenCodex from rerouting Omnigent sessions
+      through a local proxy.  Safe fields (``model_reasoning_effort``,
+      ``[features]``, etc.) are preserved.  An in-TUI ``/model`` command
+      still writes only to the session's own private copy.
 
     :param target_dir: The per-conversation temp ``CODEX_HOME``
         directory. Must already exist.
@@ -731,7 +785,14 @@ def _populate_codex_home_config(target_dir: Path, source_dir: Path) -> None:
         dest_path = target_dir / filename
         if dest_path.exists() or dest_path.is_symlink():
             continue
-        shutil.copy2(source_file, dest_path)
+        if filename == "config.toml":
+            # Sanitise: strip third-party provider routing and user model
+            # overrides so the Codex CLI uses its built-in subscription
+            # provider rather than an OpenCodex local proxy.
+            raw = source_file.read_text(encoding="utf-8")
+            dest_path.write_text(_sanitise_codex_config(raw), encoding="utf-8")
+        else:
+            shutil.copy2(source_file, dest_path)
 
 
 def _databricks_codex_base_url(host: str) -> str:
@@ -1252,6 +1313,14 @@ class _CodexAppServerSession:
             argv = [self._codex_path, "app-server"]
             for override in self._codex_config_overrides:
                 argv.extend(["-c", override])
+            logger.info(
+                "Codex app-server launch: model_override=%s codex_home=%s",
+                any(
+                    override.startswith("model=")
+                    for override in self._codex_config_overrides
+                ),
+                self._codex_home_dir,
+            )
             self._proc = await _create_subprocess_exec(
                 *argv,
                 stdin=asyncio.subprocess.PIPE,
@@ -2241,6 +2310,13 @@ class CodexExecutor(Executor):
                     auth_refresh_interval_ms=self._gateway_auth_refresh_interval_ms,
                 )
             )
+        if not gateway and model is not None:
+            # Subscription direct mode: pin the resolved model via an
+            # explicit ``-c`` override so neither the user's
+            # ``config.toml`` model nor a third-party override can
+            # shadow it.  ``HARNESS_CODEX_MODEL`` is an input, not a
+            # safety boundary — the argv flag is authoritative.
+            self._codex_config_overrides.append(f"model={json.dumps(model)}")
         if not enable_web_search:
             # Disable Codex's built-in web_search tool so the model can only reach
             # tools exposed by Omnigent as dynamicTools. The top-level web_search

@@ -69,6 +69,39 @@ class TestLoadFromDict(unittest.TestCase):
         a = load_agent_def({"name": "t", "executor": {"model": "claude-sonnet-4"}})
         self.assertEqual(a.executor.model, "claude-sonnet-4")
 
+    def test_executor_bundle_nesting_rejected(self):
+        """Single-file executor with bundle-style 'type'/'config' keys fails loud (#3178)."""
+        with self.assertRaises(ValueError) as ctx:
+            load_agent_def({"name": "t", "executor": {"type": "codex", "config": {"model": "x"}}})
+        msg = str(ctx.exception)
+        self.assertIn("config.yaml", msg)
+        self.assertIn("executor: {harness: codex-native, model: gpt-5.4-mini}", msg)
+
+    def test_executor_extra_keys_tolerated(self):
+        """Compat extra keys (e.g. use_responses) still load without error."""
+        a = load_agent_def(
+            {"name": "t", "executor": {"model": "gpt-5", "use_responses": True}}
+        )
+        self.assertEqual(a.executor.model, "gpt-5")
+
+    def test_tools_agent_executor_bundle_nesting_rejected(self):
+        """Inline AgentTool executor with bundle nesting also fails loud (#3178)."""
+        with self.assertRaises(ValueError) as ctx:
+            load_agent_def(
+                {
+                    "name": "t",
+                    "tools": {
+                        "h": {
+                            "type": "agent",
+                            "prompt": "Help.",
+                            "executor": {"type": "codex", "config": {"model": "x"}},
+                        }
+                    },
+                }
+            )
+        msg = str(ctx.exception)
+        self.assertIn("config.yaml", msg)
+
     def test_tools_function(self):
         a = load_agent_def(
             {"name": "t", "tools": {"f": {"type": "function", "catalog_path": "a.b.c"}}}

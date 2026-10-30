@@ -376,6 +376,11 @@ _LOCAL_DAEMON_ENV_ALLOWLIST: frozenset[str] = frozenset(
         "TOGETHER_API_KEY",
         "VOYAGE_API_KEY",
         "XAI_API_KEY",
+        # Python stdout/stderr encoding. Forward so a parent that set
+        # PYTHONUTF8=1 (or PYTHONIOENCODING=utf-8) still protects the
+        # local host/server daemon on Windows GBK consoles. Not secrets.
+        "PYTHONUTF8",
+        "PYTHONIOENCODING",
     }
 )
 _LOCAL_DAEMON_ENV_PREFIXES: tuple[str, ...] = (
@@ -4332,7 +4337,12 @@ def _reject_native_on_windows(harness: str) -> None:
 
 
 @cli.command("platform-info")
-@click.option("--json", "as_json", is_flag=True, help="以 JSON 输出平台能力，便于安装脚本和 Agent 读取。")
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="以 JSON 输出平台能力，便于安装脚本和 Agent 读取。",
+)
 def platform_info(as_json: bool) -> None:
     """显示当前系统可用的 Omnigent 中文版运行模式。"""
     capabilities = inspect_platform()

@@ -17976,3 +17976,249 @@ async def test_events_stop_session_on_kiro_native_503_when_kill_fails(
         f"No session.status: idle should be enqueued when kill_session failed; "
         f"got {status_idle!r}."
     )
+
+
+# ── rework: builder developer_instructions capture on auto_create ──
+
+
+@pytest.mark.asyncio
+async def test_auto_create_codex_terminal_fresh_passes_developer_instructions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fresh non-fork builder receives AgentSpec instructions."""
+    import omnigent.codex_native_bridge as codex_native_bridge
+    import omnigent.runner.app as runner_app_mod
+    from omnigent.spec.types import AgentSpec, ExecutorSpec
+
+    session_id = "conv_di_fresh"
+    sentinel = "OMNIGENT_PROMPT_SENTINEL_C2853_PHASE2_7f3a9c"
+    monkeypatch.setattr(codex_native_bridge, "_BRIDGE_ROOT", tmp_path / "codex-bridge")
+    monkeypatch.setenv("OMNIGENT_RUNNER_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setenv("RUNNER_SERVER_URL", "http://ap.example")
+    monkeypatch.delenv("DATABRICKS_CONFIG_PROFILE", raising=False)
+    monkeypatch.setattr("omnigent.runner._entry._make_auth_token_factory", lambda: None)
+    monkeypatch.setattr(
+        "omnigent.inner.codex_executor._find_codex_cli", lambda: "/usr/bin/codex"
+    )
+    monkeypatch.setattr(
+        "omnigent.inner.codex_executor.populate_codex_skills_from_bundle",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.resolve_native_codex_launch",
+        lambda **_k: type(
+            "L",
+            (),
+            {"model": "gpt-5.4-mini", "profile": None, "config_overrides": []},
+        )(),
+    )
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.codex_session_meta_model_provider",
+        lambda _l: None,
+    )
+
+    class _Snap:
+        async def get(self, url: str, **kwargs: Any) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={"workspace": str(tmp_path / "ws"), "external_session_id": None},
+                request=httpx.Request("GET", url),
+            )
+
+    build_calls: list[dict[str, Any]] = []
+
+    class _Srv:
+        codex_path = "/usr/bin/codex"
+        env: dict[str, str] = {}
+        config_overrides: list[str] = []
+        listen_url: str | None = None
+        codex_home = tmp_path / "ch"
+
+        async def start(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    def _build(**kwargs: Any) -> _Srv:
+        build_calls.append(kwargs)
+        return _Srv()
+
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.build_codex_native_server",
+        _build,
+    )
+
+    class _Cli:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def connect(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.CodexAppServerClient",
+        _Cli,
+    )
+
+    async def _noop_async(*_a: Any, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(runner_app_mod, "_cancel_auto_forwarder_task", _noop_async)
+
+    class _Reg:
+        async def launch_auxiliary_terminal(self, **kwargs: Any) -> Any:
+            raise RuntimeError("stop-after-builder-capture")
+
+    spec = AgentSpec(
+        spec_version=1,
+        name="di",
+        instructions=sentinel,
+        executor=ExecutorSpec(model="gpt-5.4-mini", config={"harness": "codex-native"}),
+    )
+    try:
+        await runner_app_mod._auto_create_codex_terminal(
+            session_id,
+            _Reg(),  # type: ignore[arg-type]
+            lambda *a, **k: None,
+            agent_spec=spec,
+            server_client=_Snap(),  # type: ignore[arg-type]
+        )
+    except Exception:
+        if not build_calls:
+            raise
+    assert build_calls
+    assert build_calls[0].get("developer_instructions") == sentinel
+
+
+@pytest.mark.asyncio
+async def test_auto_create_codex_terminal_fork_fallback_skips_developer_instructions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fork labels with clone failure still pass developer_instructions=None."""
+    import omnigent.codex_native_bridge as codex_native_bridge
+    import omnigent.runner.app as runner_app_mod
+    from omnigent.spec.types import AgentSpec, ExecutorSpec
+    from omnigent.stores.conversation_store import (
+        FORK_SOURCE_EXTERNAL_SESSION_LABEL_KEY,
+        FORK_SOURCE_LABEL_KEY,
+    )
+
+    session_id = "conv_di_fork_fail"
+    sentinel = "OMNIGENT_PROMPT_SENTINEL_C2853_PHASE2_7f3a9c"
+    monkeypatch.setattr(codex_native_bridge, "_BRIDGE_ROOT", tmp_path / "codex-bridge")
+    monkeypatch.setenv("OMNIGENT_RUNNER_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setenv("RUNNER_SERVER_URL", "http://ap.example")
+    monkeypatch.delenv("DATABRICKS_CONFIG_PROFILE", raising=False)
+    monkeypatch.setattr("omnigent.runner._entry._make_auth_token_factory", lambda: None)
+    monkeypatch.setattr(
+        "omnigent.inner.codex_executor._find_codex_cli", lambda: "/usr/bin/codex"
+    )
+    monkeypatch.setattr(
+        "omnigent.inner.codex_executor.populate_codex_skills_from_bundle",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.resolve_native_codex_launch",
+        lambda **_k: type(
+            "L",
+            (),
+            {"model": "gpt-5.4-mini", "profile": None, "config_overrides": []},
+        )(),
+    )
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.codex_session_meta_model_provider",
+        lambda _l: None,
+    )
+    monkeypatch.setattr(
+        "omnigent.codex_native._clone_codex_rollout",
+        lambda **_k: (_ for _ in ()).throw(RuntimeError("no rollout")),
+    )
+
+    class _Snap:
+        async def get(self, url: str, **kwargs: Any) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "workspace": str(tmp_path / "ws"),
+                    "external_session_id": None,
+                    "labels": {
+                        FORK_SOURCE_LABEL_KEY: "src",
+                        FORK_SOURCE_EXTERNAL_SESSION_LABEL_KEY: "src-thread",
+                    },
+                },
+                request=httpx.Request("GET", url),
+            )
+
+    build_calls: list[dict[str, Any]] = []
+
+    class _Srv:
+        codex_path = "/usr/bin/codex"
+        env: dict[str, str] = {}
+        config_overrides: list[str] = []
+        listen_url: str | None = None
+        codex_home = tmp_path / "ch"
+
+        async def start(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    def _build(**kwargs: Any) -> _Srv:
+        build_calls.append(kwargs)
+        return _Srv()
+
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.build_codex_native_server",
+        _build,
+    )
+
+    class _Cli:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def connect(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "omnigent.codex_native_app_server.CodexAppServerClient",
+        _Cli,
+    )
+
+    async def _noop_async(*_a: Any, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(runner_app_mod, "_cancel_auto_forwarder_task", _noop_async)
+
+    class _Reg:
+        async def launch_auxiliary_terminal(self, **kwargs: Any) -> Any:
+            raise RuntimeError("stop-after-builder-capture")
+
+    spec = AgentSpec(
+        spec_version=1,
+        name="di",
+        instructions=sentinel,
+        executor=ExecutorSpec(model="gpt-5.4-mini", config={"harness": "codex-native"}),
+    )
+    try:
+        await runner_app_mod._auto_create_codex_terminal(
+            session_id,
+            _Reg(),  # type: ignore[arg-type]
+            lambda *a, **k: None,
+            agent_spec=spec,
+            server_client=_Snap(),  # type: ignore[arg-type]
+        )
+    except Exception:
+        if not build_calls:
+            raise
+    assert build_calls
+    assert build_calls[0].get("developer_instructions") is None

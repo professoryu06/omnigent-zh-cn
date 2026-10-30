@@ -204,6 +204,26 @@ def test_ensure_host_daemon_local_inherits_data_dir_and_db_uri(
     assert env["OMNIGENT_DATABASE_URI"] == "postgresql://u:pw@h/db"
 
 
+def test_build_host_daemon_env_local_forwards_python_utf8_encoding_knobs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local host daemon must inherit PYTHONUTF8 / PYTHONIOENCODING.
+
+    Without these, a Windows GBK console daemon can UnicodeEncodeError on
+    the connection banner and drop the tunnel immediately after hello.
+    """
+    monkeypatch.setenv("PYTHONUTF8", "1")
+    monkeypatch.setenv("PYTHONIOENCODING", "utf-8")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    env = _build_host_daemon_env(server_url=None)
+    assert env.get("PYTHONUTF8") == "1"
+    assert env.get("PYTHONIOENCODING") == "utf-8"
+    # Allowlist, not denylist: unrelated secrets stay out unless listed.
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+    env2 = _build_host_daemon_env(server_url=None)
+    assert "AWS_SECRET_ACCESS_KEY" not in env2
+
+
 def test_build_host_daemon_env_local_preserves_server_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

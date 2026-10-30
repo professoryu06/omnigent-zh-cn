@@ -6,7 +6,10 @@ Omnigent continues to use canonical harness identifiers internally.
 
 from __future__ import annotations
 
-from omnigent.harness_plugins import harness_aliases, native_harnesses
+from dataclasses import dataclass
+from typing import Literal
+
+from omnigent.harness_plugins import harness_aliases, harness_modules, native_harnesses
 
 HARNESS_ALIASES: dict[str, str] = harness_aliases()
 
@@ -17,6 +20,68 @@ HARNESS_ALIASES: dict[str, str] = harness_aliases()
 # canonical spellings for native agents, so no executor-type aliasing is needed
 # here.
 NATIVE_HARNESSES: frozenset[str] = native_harnesses()
+
+# How the runner should drive a resolved harness: in-process / CLI-subprocess
+# SDK path vs native TUI terminal path. ``unknown`` covers test/custom ids.
+HarnessDispatchMode = Literal["sdk", "native", "unknown"]
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessDispatch:
+    """Single source of truth for runner harness routing.
+
+    :param raw_harness: Pre-canonicalize spelling from the spec/override,
+        e.g. ``"codex"`` or ``"native-codex"``.
+    :param canonical_harness: Canonical id after alias fold, e.g.
+        ``"codex"`` or ``"codex-native"``. Bare ``codex`` stays ``codex``
+        (never rewritten to ``codex-native``).
+    :param is_native: ``True`` only for native-CLI harnesses that need a
+        terminal pane (``codex-native``, ``claude-native``, …).
+    :param module: Import path for the harness FastAPI wrap, e.g.
+        ``"omnigent.inner.codex_harness"``, or ``None`` when unregistered.
+    :param dispatch_mode: ``"sdk"`` for process-manager harnesses,
+        ``"native"`` for terminal-first harnesses, ``"unknown"`` otherwise.
+    """
+
+    raw_harness: str
+    canonical_harness: str
+    is_native: bool
+    module: str | None
+    dispatch_mode: HarnessDispatchMode
+
+
+def resolve_harness_dispatch(
+    harness: str | None,
+    *,
+    override: str | None = None,
+) -> HarnessDispatch:
+    """Resolve how the runner must dispatch a harness spelling.
+
+    Session create, turn dispatch, and terminal ensure endpoints share this
+    so bare ``codex`` cannot silently take the ``codex-native`` terminal path.
+
+    :param harness: Spec / executor harness id, e.g. ``"codex"``.
+    :param override: Optional per-session harness override; wins when set.
+    :returns: :class:`HarnessDispatch` with canonical id, native flag, and
+        registered module path.
+    """
+    raw = (override if override is not None else harness) or ""
+    canonical = canonicalize_harness(raw) or raw or "unknown"
+    native = is_native_harness(canonical)
+    module = harness_modules().get(canonical)
+    if native:
+        mode: HarnessDispatchMode = "native"
+    elif module is not None:
+        mode = "sdk"
+    else:
+        mode = "unknown"
+    return HarnessDispatch(
+        raw_harness=raw or canonical,
+        canonical_harness=canonical,
+        is_native=native,
+        module=module,
+        dispatch_mode=mode,
+    )
 
 
 def canonicalize_harness(harness: str | None) -> str | None:

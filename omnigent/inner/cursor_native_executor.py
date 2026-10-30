@@ -33,6 +33,7 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,11 @@ class CursorNativeExecutor(Executor):
         config: ExecutorConfig | None = None,
     ) -> AsyncIterator[ExecutorEvent]:
         """Inject the latest web-UI user message into the Cursor TUI pane."""
+        try:
+            note_native_system_prompt("cursor-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt, config
         text = _latest_user_text(messages, self._bridge_dir)
         if not text:

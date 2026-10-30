@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -45,6 +47,18 @@ from omnigent.runner.identity import (
     RUNNER_WORKSPACE_ENV_VAR,
     token_bound_runner_id,
 )
+
+# Portable short-lived "keep alive" child for launch/stop tests. ``sleep`` is
+# not on PATH on Windows; Python is always available under pytest.
+_KEEPALIVE_ARGV = [sys.executable, "-c", "import time; time.sleep(60)"]
+_SHORT_KEEPALIVE_ARGV = [sys.executable, "-c", "import time; time.sleep(10)"]
+
+
+def _set_home(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
+    """Point both POSIX HOME and Windows USERPROFILE at *home* for expanduser."""
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
 
 pytestmark = pytest.mark.asyncio
 
@@ -116,7 +130,7 @@ async def test_handle_launch_spawns_subprocess(
         spawned_kwargs.update(kwargs)
         # Spawn a real process that sleeps briefly so poll() returns None.
         return original_popen(
-            ["sleep", "10"],
+            _SHORT_KEEPALIVE_ARGV,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -294,7 +308,7 @@ async def test_handle_launch_configured_harness_proceeds_to_spawn(
         :returns: A real subprocess handle.
         """
         return original_popen(
-            ["sleep", "10"],
+            _SHORT_KEEPALIVE_ARGV,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -356,7 +370,7 @@ async def test_handle_launch_without_harness_skips_check(
         :returns: A real subprocess handle.
         """
         return original_popen(
-            ["sleep", "10"],
+            _SHORT_KEEPALIVE_ARGV,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -410,7 +424,7 @@ async def test_handle_launch_prints_exact_runner_log_path(
         :returns: A real subprocess handle.
         """
         return original_popen(
-            ["sleep", "10"],
+            _SHORT_KEEPALIVE_ARGV,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -494,7 +508,15 @@ async def test_handle_launch_immediate_exit_reports_exit_code_and_log_tail(
         :returns: A finished subprocess handle with returncode 7.
         """
         proc = original_popen(
-            ["sh", "-c", "echo 'RuntimeError: boom-traceback' >&2; exit 7"],
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; "
+                    "sys.stderr.write('RuntimeError: boom-traceback\\n'); "
+                    "sys.stderr.flush(); raise SystemExit(7)"
+                ),
+            ],
             stdin=subprocess.DEVNULL,
             stdout=kwargs["stdout"],
             stderr=kwargs["stderr"],
@@ -555,7 +577,15 @@ async def test_watch_runner_reports_unexpected_exit(
         :returns: A live subprocess handle.
         """
         return original_popen(
-            ["sh", "-c", "echo 'tunnel rejected: crash-cause' >&2; sleep 0.2; exit 3"],
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys, time; "
+                    "sys.stderr.write('tunnel rejected: crash-cause\\n'); "
+                    "sys.stderr.flush(); time.sleep(0.2); sys.exit(3)"
+                ),
+            ],
             stdin=subprocess.DEVNULL,
             stdout=kwargs["stdout"],
             stderr=kwargs["stderr"],
@@ -613,7 +643,7 @@ async def test_watch_runner_silent_on_intentional_stop(
         :returns: A live subprocess handle.
         """
         return original_popen(
-            ["sleep", "60"],
+            _KEEPALIVE_ARGV,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -639,6 +669,60 @@ async def test_watch_runner_silent_on_intentional_stop(
 
     # No runner_exited report and nothing parked for a reconnect —
     # either would mark a clean stop as a crash.
+    assert tunnel.sent == []
+    assert host._unreported_exits == {}
+
+
+async def test_watch_runner_silent_on_clean_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A runner that exits with code 0 while still tracked is NOT a crash.
+
+    Idle runners shut down gracefully (exit 0). The watcher must not
+    report a clean exit as an unexpected crash — that would attach a
+    scary error to every normal idle shutdown.
+
+    :param tmp_path: Pytest temp directory.
+    :param monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
+    monkeypatch.setattr("omnigent.host.connect._RUNNER_WATCH_INTERVAL_S", 0.01)
+    host = _make_host_process()
+    tunnel = _FakeTunnel()
+    host._ws = tunnel  # type: ignore[assignment] — duck-typed send
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+
+    original_popen = subprocess.Popen
+
+    def _fake_popen(args: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        """Spawn a runner that exits cleanly (code 0).
+
+        :param args: Command args (ignored).
+        :param kwargs: Popen kwargs from production.
+        :returns: A live subprocess handle.
+        """
+        return original_popen(
+            [sys.executable, "-c", "raise SystemExit(0)"],
+            stdin=subprocess.DEVNULL,
+            stdout=kwargs["stdout"],
+            stderr=kwargs["stderr"],
+        )
+
+    frame = HostLaunchRunnerFrame(
+        request_id="req_clean",
+        binding_token="tok_clean",
+        workspace=str(workspace),
+    )
+    with patch("omnigent.host.connect.subprocess.Popen", side_effect=_fake_popen):
+        result = await host._handle_launch(frame)
+    assert result.status == "launched", result.error
+
+    # Wait for the watcher to observe the clean exit.
+    await asyncio.wait_for(asyncio.gather(*host._watcher_tasks), timeout=5.0)
+
+    # No crash report and nothing parked — code 0 is a graceful exit.
     assert tunnel.sent == []
     assert host._unreported_exits == {}
 
@@ -706,7 +790,7 @@ def test_handle_stop_terminates_process(tmp_path: Path) -> None:
     """
     host = _make_host_process()
     proc = subprocess.Popen(
-        ["sleep", "60"],
+        _KEEPALIVE_ARGV,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -757,12 +841,12 @@ def test_alive_runner_ids_cleans_dead(tmp_path: Path) -> None:
     host = _make_host_process()
 
     alive_proc = subprocess.Popen(
-        ["sleep", "60"],
+        _KEEPALIVE_ARGV,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     dead_proc = subprocess.Popen(
-        ["true"],
+        [sys.executable, "-c", "raise SystemExit(0)"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -796,7 +880,7 @@ def test_cleanup_runners_terminates_all(tmp_path: Path) -> None:
     procs = []
     for name in ("runner_a", "runner_b", "runner_c"):
         proc = subprocess.Popen(
-            ["sleep", "60"],
+            _KEEPALIVE_ARGV,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -812,6 +896,7 @@ def test_cleanup_runners_terminates_all(tmp_path: Path) -> None:
     assert host._runners == {}
 
 
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="POSIX orphan reaping requires os.fork")
 def test_reap_orphans_reaps_orphaned_children(tmp_path: Path) -> None:
     """Regression for #1782: orphaned children are reaped, not leaked.
 
@@ -826,7 +911,6 @@ def test_reap_orphans_reaps_orphaned_children(tmp_path: Path) -> None:
     reaper. ``_reap_orphans_once`` must drain it.
     """
     import errno
-    import os
 
     host = _make_host_process()
 
@@ -854,6 +938,10 @@ def test_reap_orphans_reaps_orphaned_children(tmp_path: Path) -> None:
     assert host._reap_orphans_once() == 0
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "WNOHANG"),
+    reason="POSIX orphan reaping requires waitpid WNOHANG",
+)
 def test_reap_orphans_never_steals_tracked_runner_exit_code(tmp_path: Path) -> None:
     """The reaper must not consume a tracked runner's exit status (#1782).
 
@@ -866,7 +954,7 @@ def test_reap_orphans_never_steals_tracked_runner_exit_code(tmp_path: Path) -> N
     host = _make_host_process()
 
     # A tracked runner that exits non-zero (a "crash").
-    runner = subprocess.Popen(["python3", "-c", "import sys; sys.exit(42)"])
+    runner = subprocess.Popen([sys.executable, "-c", "import sys; sys.exit(42)"])
     host._runners["runner_crash"] = _RunnerHandle(
         proc=runner, log_path=tmp_path / "runner-crash.log"
     )
@@ -906,7 +994,7 @@ def test_reaper_does_not_steal_host_owned_subprocess_exit_code(tmp_path: Path) -
     # A host-owned subprocess (git stand-in) that FAILS with a distinctive
     # code. NOT a tracked runner — indistinguishable from an orphan to a naive
     # reaper.
-    proc = subprocess.Popen(["sh", "-c", "exit 42"])
+    proc = subprocess.Popen([sys.executable, "-c", "raise SystemExit(42)"])
     # Let it exit so it is reapable (the dangerous window subprocess.run has
     # between the child exiting and its internal wait()).
     time.sleep(0.3)
@@ -999,7 +1087,7 @@ def test_host_spawned_runner_has_parent_pid_env(
         env = kwargs.get("env", {})
         spawned_env.update(env)
         return original_popen(
-            ["sleep", "10"],
+            _SHORT_KEEPALIVE_ARGV,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -1194,8 +1282,8 @@ def test_handle_stat_expands_tilde(tmp_path: Path, monkeypatch) -> None:
     handler skipped expansion, agent specs with ``cwd: ~/foo``
     would never resolve and validation would fail on every host.
     """
-    # Point HOME at our tmp_path so ~ resolves predictably.
-    monkeypatch.setenv("HOME", str(tmp_path))
+    # Point HOME/USERPROFILE at our tmp_path so ~ resolves predictably.
+    _set_home(monkeypatch, tmp_path)
     target = tmp_path / "subdir"
     target.mkdir()
 
@@ -1304,6 +1392,53 @@ def test_build_runner_env_allowlists_host_env_and_strips_secrets() -> None:
     assert env[RUNNER_TUNNEL_BINDING_TOKEN_ENV_VAR] == "tok"
     assert env[RUNNER_WORKSPACE_ENV_VAR] == "/ws"
     assert env[RUNNER_PARENT_PID_ENV_VAR] == "42"
+
+
+def test_build_runner_env_forwards_python_utf8_encoding_knobs() -> None:
+    """PYTHONUTF8 / PYTHONIOENCODING must reach host-spawned runners.
+
+    On Windows GBK consoles a parent that set these knobs still needs them
+    on the runner (and the host daemon that inherits the same allowlist)
+    so success banners and log lines do not raise UnicodeEncodeError.
+    Values are only forwarded when present — no invented defaults.
+    """
+    base = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": "/home/alice",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "DATABRICKS_TOKEN": "dapi-secret",
+    }
+    env = _build_runner_env(
+        base,
+        server_url="http://server",
+        runner_id="runner_abc",
+        binding_token="tok",
+        workspace="/ws",
+        parent_pid=42,
+    )
+    assert env["PYTHONUTF8"] == "1"
+    assert env["PYTHONIOENCODING"] == "utf-8"
+    # Non-harness secrets still stripped.
+    assert "DATABRICKS_TOKEN" not in env
+
+
+def test_host_connected_banner_is_ascii_encodable_under_gbk() -> None:
+    """The host connection success line must encode as GBK without error.
+
+    Regression for Windows zh-CN code pages: a checkmark / em dash in the
+    banner raised UnicodeEncodeError and tore down the fresh tunnel.
+    """
+    banner = (
+        f"[OK] Connected as {'laptop'!r} "
+        f"({'host_abc123'}), {0} live runner(s). "
+        "Listening for sessions - Ctrl-C to disconnect."
+    )
+    # Must not raise.
+    encoded = banner.encode("gbk")
+    assert b"[OK] Connected" in encoded
+    # Guard against reintroducing non-ASCII glyphs on this success path.
+    assert banner.isascii()
 
 
 def test_build_runner_env_forwards_harness_credentials_and_endpoints() -> None:
@@ -1647,7 +1782,7 @@ def test_handle_list_dir_expands_tilde(tmp_path: Path, monkeypatch) -> None:
     Without expansion, ``~/projects`` would become a
     literal subdir named ``~`` and fail with ENOENT.
     """
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _set_home(monkeypatch, tmp_path)
     (tmp_path / "subdir").mkdir()
     (tmp_path / "subdir" / "x.txt").write_text("data")
 
@@ -1855,7 +1990,7 @@ def test_handle_create_dir_expands_tilde(tmp_path: Path, monkeypatch) -> None:
     The host owns ``~`` resolution; without expansion ``~/scratch``
     would become a literal ``~`` subdir of the process cwd.
     """
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _set_home(monkeypatch, tmp_path)
 
     host = _make_host_process()
     result = host._handle_create_dir(HostCreateDirFrame(request_id="m5", path="~/scratch"))

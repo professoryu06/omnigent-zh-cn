@@ -50,6 +50,7 @@ from omnigent.harness_aliases import (
     canonicalize_harness,
     is_native_harness,
     native_terminal_name,
+    resolve_harness_dispatch,
 )
 from omnigent.harness_plugins import load_object, model_env_keys, spawn_env_builders
 from omnigent.llms.summarize import (
@@ -3493,6 +3494,13 @@ async def _auto_create_codex_terminal(
         server_client=server_client,
     )
     original_external_session_id = launch_config.external_session_id
+    # Fork paths must never claim prompt apply — even when clone/rebuild
+    # fails and external_session_id stays None (degraded "fresh" launch).
+    is_fork_launch = bool(
+        launch_config.fork_source_id
+        or launch_config.fork_source_external_id
+        or launch_config.fork_carry_history
+    )
     workspace = str(launch_config.workspace)
     bridge_dir = prepare_bridge_dir(session_id)
     socket_path = socket_path_for_bridge_dir(bridge_dir)
@@ -3730,6 +3738,14 @@ async def _auto_create_codex_terminal(
         ap_server_url=launch_config.policy_server_url,
         ap_auth_headers=policy_headers,
         bypass_sandbox=launch_config.bypass_sandbox,
+        developer_instructions=(
+            _codex_native_developer_instructions(agent_spec)
+            if (
+                launch_config.external_session_id is None
+                and not is_fork_launch
+            )
+            else None
+        ),
     )
     app_server.listen_url = codex_ws_url
     await app_server.start()
@@ -4831,6 +4847,24 @@ def _codex_native_model_from_spec(agent_spec: AgentSpec | ResolvedSpec | None) -
         return model
     config_model = spec.executor.config.get("model")
     return config_model if isinstance(config_model, str) and config_model else None
+
+
+def _codex_native_developer_instructions(
+    agent_spec: AgentSpec | ResolvedSpec | None,
+) -> str | None:
+    """Extract agent-spec instructions for codex-native developer_instructions.
+
+    :param agent_spec: Agent spec or resolved wrapper. ``None`` → ``None``.
+    :returns: Non-empty instructions string, or ``None`` for empty/blank/
+        non-string/missing values.
+    """
+    spec = agent_spec.spec if isinstance(agent_spec, ResolvedSpec) else agent_spec
+    if spec is None:
+        return None
+    instructions = getattr(spec, "instructions", None)
+    if not isinstance(instructions, str) or not instructions.strip():
+        return None
+    return instructions
 
 
 def _claude_native_model_from_spec(agent_spec: AgentSpec | ResolvedSpec | None) -> str | None:
@@ -6643,6 +6677,35 @@ def _resolved_spec_workdir(entry: Any) -> Path | None:
     return entry.workdir if isinstance(entry, ResolvedSpec) else None
 
 
+def _harness_from_agent_spec(agent_spec: Any | None) -> str | None:
+    """Return the harness id declared on an agent / resolved-spec entry.
+
+    Prefer ``executor.config["harness"]`` (the omnigent config field) over
+    ``executor.type`` so bare ``codex`` stays distinct from ``codex-native``.
+    Also accept a top-level ``executor.harness`` when present (loader may
+    fold nested ``config.harness`` there).
+
+    :param agent_spec: An :class:`AgentSpec`, :class:`ResolvedSpec`, or
+        ``None``.
+    :returns: Raw harness spelling, e.g. ``"codex"``, or ``None``.
+    """
+    if agent_spec is None:
+        return None
+    spec = _unwrap_resolved_spec(agent_spec)
+    executor = getattr(spec, "executor", None)
+    if executor is None:
+        return None
+    config = getattr(executor, "config", None) or {}
+    harness = None
+    if isinstance(config, Mapping):
+        harness = config.get("harness")
+    if not harness:
+        harness = getattr(executor, "harness", None)
+    if not harness:
+        harness = getattr(executor, "type", None)
+    return harness if isinstance(harness, str) and harness else None
+
+
 def _resolved_workdir_for_spec(spec: Any, fallback: Path | None) -> Path | None:
     """Return the bundle workdir for a possibly wrapped spec entry."""
     return _resolved_spec_workdir(spec) or fallback
@@ -8083,6 +8146,20 @@ def create_runner_app(
 
     app.state.has_active_work = _has_active_work
 
+    def _drain_session_streams() -> None:
+        """Enqueue a ``None`` sentinel into every active session queue.
+
+        Called during graceful shutdown so SSE generators blocked on
+        ``queue.get()`` wake up and terminate promptly instead of
+        hanging until the process is killed.
+
+        :returns: None.
+        """
+        for q in list(_session_event_queues.values()):
+            q.put_nowait(None)
+
+    app.state.drain_session_streams = _drain_session_streams
+
     def _publish_event(session_id: str, event: dict[str, Any]) -> None:
         """Put an event on the session's queue for GET /stream.
 
@@ -8855,6 +8932,18 @@ def create_runner_app(
                     )
             harness_name = spec.executor.config.get("harness") or spec.executor.type
             harness_name = canonicalize_harness(harness_name) or harness_name
+            _dispatch = resolve_harness_dispatch(harness_name)
+            _logger.info(
+                "session start harness dispatch: session=%s executor_type=%s "
+                "config_harness=%s canonical=%s is_native=%s module=%s mode=%s",
+                session_id,
+                getattr(spec.executor, "type", None),
+                (spec.executor.config or {}).get("harness"),
+                _dispatch.canonical_harness,
+                _dispatch.is_native,
+                _dispatch.module,
+                _dispatch.dispatch_mode,
+            )
 
             # ── sys_agent_start policy gate ───────────────────────
             # Evaluate a synthetic ``sys_agent_start`` tool call so
@@ -15827,6 +15916,73 @@ def create_runner_app(
             and terminal_name == "codex"
             and session_key == "main"
         ):
+            # Hard guard when the session harness is *known*:
+            # - bare ``codex`` (SDK/app-server) must NOT create the native TUI
+            #   (Windows: TerminalRegistry.launch → tmux/PTY RuntimeError).
+            # - only ``codex-native`` (or native-codex alias) may auto-create.
+            # When the session spec cannot be resolved, fail *open* for this
+            # explicit ensure marker: CLI resume and older callers may hit
+            # ensure before the session cache is warm. Unknown is NOT treated
+            # as bare ``codex``.
+            codex_agent_spec: AgentSpec | ResolvedSpec | None
+            try:
+                codex_agent_spec = await _resolve_session_agent_spec(session_id)
+            except OmnigentError:
+                codex_agent_spec = None
+            session_harness = _harness_from_agent_spec(codex_agent_spec)
+            # Prefer an in-memory override stamped at session start when present.
+            cached_spec = _session_spec_cache.get(session_id)
+            if cached_spec is not None:
+                cached_harness = _harness_from_agent_spec(cached_spec)
+                if cached_harness:
+                    session_harness = cached_harness
+            if session_harness:
+                dispatch = resolve_harness_dispatch(session_harness)
+                _logger.info(
+                    "codex terminal ensure dispatch: session=%s raw=%s canonical=%s "
+                    "is_native=%s module=%s mode=%s",
+                    session_id,
+                    dispatch.raw_harness,
+                    dispatch.canonical_harness,
+                    dispatch.is_native,
+                    dispatch.module,
+                    dispatch.dispatch_mode,
+                )
+                is_codex_native = (
+                    dispatch.is_native
+                    and native_terminal_name(dispatch.canonical_harness) == "codex"
+                )
+                if not is_codex_native:
+                    _logger.error(
+                        "Refusing codex native terminal ensure for non-native harness: "
+                        "session=%s canonical=%s mode=%s module=%s "
+                        "(use harness: codex-native for TUI, or harness: codex for SDK)",
+                        session_id,
+                        dispatch.canonical_harness,
+                        dispatch.dispatch_mode,
+                        dispatch.module,
+                    )
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": {
+                                "code": "native_terminal_not_applicable",
+                                "message": (
+                                    f"Session harness {dispatch.canonical_harness!r} is not "
+                                    "codex-native; refusing ensure_native_terminal. "
+                                    "Use executor.config.harness: codex for the SDK/app-server "
+                                    "path, or codex-native for the interactive TUI."
+                                ),
+                            }
+                        },
+                    )
+            else:
+                _logger.warning(
+                    "codex terminal ensure: session harness unresolved for %s; "
+                    "allowing ensure_native_terminal (explicit marker, fail-open; "
+                    "not inventing harness=codex)",
+                    session_id,
+                )
             codex_terminal_id = terminal_resource_id("codex", "main")
             ensure_lock = _codex_terminal_ensure_locks.setdefault(session_id, asyncio.Lock())
             async with ensure_lock:
@@ -15856,7 +16012,6 @@ def create_runner_app(
                             },
                         )
                 try:
-                    codex_agent_spec = await _resolve_session_agent_spec(session_id)
                     terminal_view = await _auto_create_codex_terminal(
                         session_id,
                         resource_registry,

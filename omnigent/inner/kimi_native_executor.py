@@ -30,6 +30,7 @@ from omnigent.inner.executor import (
     ToolSpec,
     TurnComplete,
 )
+from omnigent.inner.native_prompt_delivery import note_native_system_prompt
 from omnigent.kimi_native_bridge import BRIDGE_DIR_ENV_VAR, inject_user_message
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,11 @@ class KimiNativeExecutor(Executor):
         config: ExecutorConfig | None = None,
     ) -> AsyncIterator[ExecutorEvent]:
         """Inject the latest web-UI user message into the Kimi TUI pane."""
+        try:
+            note_native_system_prompt("kimi-native", system_prompt, applied=False)
+        except ValueError as exc:
+            yield ExecutorError(message=str(exc))
+            return
         del tools, system_prompt, config
         text = _latest_user_text(messages, self._bridge_dir)
         if not text:

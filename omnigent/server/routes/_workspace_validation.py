@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import secrets
 from typing import Any
 
@@ -43,6 +44,49 @@ _RELATIVE_CWD_PLACEHOLDERS: frozenset[str] = frozenset({"", ".", "./"})
 # 5 s is generous for transient network slowness without making
 # session-create feel hung if the host is wedged.
 _STAT_TIMEOUT_S: float = 5.0
+
+# Windows drive-absolute: ``C:\...`` or ``C:/...`` (drive letter + colon + separator).
+_WIN_DRIVE_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+# Windows UNC absolute: ``\\server\share`` or ``//server/share``.
+_WIN_UNC_ABSOLUTE_RE = re.compile(r"^[\\/]{2}[^\\/]+[\\/]+[^\\/]+")
+
+
+def _is_absolute_path(path: str) -> bool:
+    """Return ``True`` when *path* is a fully-qualified absolute path.
+
+    Pure syntax check — no filesystem access. Accepts:
+
+    - POSIX absolute (``/...``)
+    - Windows drive-absolute (``C:\\...`` or ``C:/...``)
+    - Windows UNC absolute (``\\\\server\\share``)
+
+    Rejects relative, tilde, drive-relative (``C:foo``) and
+    rooted-without-drive (``\\foo``) paths.
+
+    :param path: User-supplied workspace string.
+    :returns: ``True`` when the path is absolute on either platform.
+    """
+    if path.startswith("/"):
+        return True
+    if _WIN_DRIVE_ABSOLUTE_RE.match(path):
+        return True
+    if _WIN_UNC_ABSOLUTE_RE.match(path):
+        return True
+    return False
+
+
+def _is_windows_flavor(path: str) -> bool:
+    """Return ``True`` when *path* looks like a Windows path.
+
+    Used to pick the correct separator and case-sensitivity rules
+    for boundary comparison. Detects drive-letter paths and UNC
+    paths; falls back to ``False`` for POSIX.
+    """
+    if _WIN_DRIVE_ABSOLUTE_RE.match(path):
+        return True
+    if path.startswith(("\\\\", "//")):
+        return True
+    return False
 
 
 class WorkspaceValidationError(Exception):
@@ -159,23 +203,41 @@ def _is_subpath_of(canonical_workspace: str, canonical_boundary: str) -> bool:
     are already resolved and ``..`` segments are gone. Without the
     canonicalization step, this comparison would be unsafe.
 
+    Windows paths are compared case-insensitively with ``\\`` as
+    separator; POSIX paths are compared case-sensitively with ``/``.
+    Mixed flavors (one Windows, one POSIX) never match.
+
     :param canonical_workspace: Realpath returned by host.stat for
-        the workspace, e.g. ``"/Users/corey/universe/src/foo"``.
+        the workspace, e.g. ``"/Users/corey/universe/src/foo"`` or
+        ``"C:\\Users\\runner\\project\\src"``.
     :param canonical_boundary: Realpath for the agent's boundary,
-        e.g. ``"/Users/corey/universe"``.
+        e.g. ``"/Users/corey/universe"`` or ``"C:\\Users\\runner\\project"``.
     :returns: ``True`` when the workspace is the boundary or
         nested under it.
     """
-    if canonical_workspace == canonical_boundary:
+    ws_is_win = _is_windows_flavor(canonical_workspace)
+    bd_is_win = _is_windows_flavor(canonical_boundary)
+    # Mixed flavors never match
+    if ws_is_win != bd_is_win:
+        return False
+
+    if ws_is_win:
+        # Windows: case-insensitive, backslash separator
+        ws = canonical_workspace.replace("/", "\\").lower()
+        bd = canonical_boundary.replace("/", "\\").lower()
+        sep = "\\"
+    else:
+        # POSIX: case-sensitive, forward slash
+        ws = canonical_workspace
+        bd = canonical_boundary
+        sep = "/"
+
+    if ws == bd:
         return True
     # Add a trailing separator so ``/a/foo`` is not treated as a
-    # subpath of ``/a/fo`` (prefix collision). ``/`` is the only
-    # separator the host stat returns since ``canonical_path`` is
-    # always absolute.
-    boundary_with_sep = (
-        canonical_boundary if canonical_boundary.endswith("/") else canonical_boundary + "/"
-    )
-    return canonical_workspace.startswith(boundary_with_sep)
+    # subpath of ``/a/fo`` (prefix collision).
+    boundary_with_sep = bd if bd.endswith(sep) else bd + sep
+    return ws.startswith(boundary_with_sep)
 
 
 async def validate_workspace(
@@ -214,11 +276,13 @@ async def validate_workspace(
         The exception message is suitable for surfacing to the
         API caller verbatim.
     """
-    if not workspace.startswith("/"):
+    if not _is_absolute_path(workspace):
         # Belt-and-suspenders. The Pydantic schema layer also
         # rejects this; pin it here so direct callers (tests,
         # other server-internal paths) can't bypass.
-        raise WorkspaceValidationError("workspace must be an absolute path starting with /")
+        raise WorkspaceValidationError(
+            "workspace must be an absolute path (POSIX /... or Windows C:\\...)"
+        )
 
     display_host = host_name_for_errors or host_id
 
@@ -293,7 +357,12 @@ async def validate_workspace(
         # Build under the canonical workspace so any symlinks in the
         # picked path are already resolved — without that, a user
         # whose workspace is a symlink could fool the existence check.
-        subdir_path = canonical_workspace.rstrip("/") + "/" + subdir
+        # Use the separator matching the canonical workspace's flavor
+        # so Windows hosts get backslash-joined paths.
+        if _is_windows_flavor(canonical_workspace):
+            subdir_path = canonical_workspace.rstrip("\\/") + "\\" + subdir
+        else:
+            subdir_path = canonical_workspace.rstrip("/") + "/" + subdir
         subdir_stat = await _ask_host_stat(
             host_registry=host_registry,
             host_conn=host_conn,
