@@ -45,6 +45,7 @@ from omnigent.entities.session_resources import (
 from omnigent.errors import ErrorCode, OmnigentError
 from omnigent.harness_aliases import (
     canonicalize_harness,
+    is_headless_harness,
     is_native_harness,
     native_terminal_name,
 )
@@ -2853,6 +2854,7 @@ def create_runner_app(
         if (
             spec is not None
             and not is_native_harness(harness_name)
+            and not is_headless_harness(harness_name)
             and not _sa_name
             and resource_registry.terminal_registry is not None
         ):

@@ -159,6 +159,7 @@ _WEB_UI_API_FALLBACK_PREFIXES = frozenset({"api", "auth", "health", "v1"})
 _WEB_UI_GZIP_MINIMUM_SIZE = 1024
 _DEBBY_AGENT_NAME = "debby"
 _POLLY_AGENT_NAME = "polly"
+_GROK_AGENT_NAME = "grok-native-ui"
 _UNMATCHED_ROUTE_TEMPLATE = "<unmatched>"
 _SESSION_PATH_RE = re.compile(r"/v1/sessions/([^/]+)")
 # polly's and debby's multi-file bundles are packaged under
@@ -473,6 +474,7 @@ def _ensure_default_agents(
     _ensure_default_native_agents(agent_store, artifact_store, agent_cache)
     _ensure_default_debby_agent(agent_store, artifact_store, agent_cache)
     _ensure_default_polly_agent(agent_store, artifact_store, agent_cache)
+    _ensure_default_grok_agent(agent_store, artifact_store, agent_cache)
     _ensure_extra_builtin_agents(agent_store, artifact_store, agent_cache)
 
 
@@ -729,6 +731,57 @@ def _ensure_default_polly_agent(
         agent_cache,
         name=_POLLY_AGENT_NAME,
         bundle_bytes=_build_polly_bundle(),
+    )
+
+
+def _build_grok_bundle() -> bytes:
+    """
+    Build a gzipped tarball of the headless ``grok-native-ui`` agent spec.
+
+    grok-native is generated (``_materialize_grok_agent_spec``) rather than a
+    packaged multi-file image, so the bundle is built from the materializer
+    each seed — no repo resource directory to ship.
+
+    :returns: Gzipped tarball bytes suitable for the artifact store.
+    """
+    import tempfile
+
+    from omnigent.grok_native import _materialize_grok_agent_spec
+    from omnigent.spec import materialize_bundle
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        spec_path = _materialize_grok_agent_spec(Path(tmpdir))
+        bundle_dir = materialize_bundle(spec_path, Path(tmpdir) / "bundle")
+        return _tar_gz_dir(bundle_dir)
+
+
+def _ensure_default_grok_agent(
+    agent_store: AgentStore,
+    artifact_store: ArtifactStore,
+    agent_cache: Any,
+) -> None:
+    """
+    Register the headless grok-native agent (``grok-native-ui``).
+
+    grok-native is a headless CLI subprocess harness (Grok CLI ``--single`` +
+    JSON), not a native TUI — so unlike claude-/qwen-/codex-native it is not a
+    :class:`NativeCodingAgent` row; it seeds through this dedicated helper like
+    polly/debby. Seeding makes the Web UI's new-session picker (and
+    Controller/AgentCenter routing) offer ``grok-native-ui`` as a
+    host-launchable card. Content-aware via :func:`_ensure_builtin_agent`:
+    when a new wheel ships a changed spec, the existing row is refreshed in
+    place instead of being ignored.
+
+    :param agent_store: Store for agent metadata.
+    :param artifact_store: Store for agent bundles.
+    :param agent_cache: Cache for loaded agent specs.
+    """
+    _ensure_builtin_agent(
+        agent_store,
+        artifact_store,
+        agent_cache,
+        name=_GROK_AGENT_NAME,
+        bundle_bytes=_build_grok_bundle(),
     )
 
 

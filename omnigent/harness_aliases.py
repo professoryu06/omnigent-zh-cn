@@ -6,7 +6,11 @@ Omnigent continues to use canonical harness identifiers internally.
 
 from __future__ import annotations
 
-from omnigent.harness_plugins import harness_aliases, native_harnesses
+from omnigent.harness_plugins import (
+    harness_aliases,
+    headless_harnesses,
+    native_harnesses,
+)
 
 HARNESS_ALIASES: dict[str, str] = harness_aliases()
 
@@ -17,6 +21,12 @@ HARNESS_ALIASES: dict[str, str] = harness_aliases()
 # canonical spellings for native agents, so no executor-type aliasing is needed
 # here.
 NATIVE_HARNESSES: frozenset[str] = native_harnesses()
+
+# Headless CLI-subprocess harnesses. These spawn a vendor CLI per turn
+# (e.g. ``grok --single`` / ``--resume``) and never attach a tmux/PTY pane,
+# so the runner's generic non-native branch must NOT auto-create a REPL
+# terminal for them.
+HEADLESS_HARNESSES: frozenset[str] = headless_harnesses()
 
 
 def canonicalize_harness(harness: str | None) -> str | None:
@@ -55,6 +65,22 @@ def is_native_harness(harness: str | None) -> bool:
     if harness is None:
         return False
     return (canonicalize_harness(harness) or harness) in NATIVE_HARNESSES
+
+
+def is_headless_harness(harness: str | None) -> bool:
+    """Return whether *harness* is a headless CLI-subprocess harness.
+
+    Headless harnesses spawn a vendor CLI per turn and never attach a
+    tmux/PTY pane, so the runner must not auto-create a REPL terminal for
+    them. Accepts canonical spellings and reversed aliases.
+
+    :param harness: A harness id, e.g. ``"grok-native"``; ``None`` returns
+        ``False``.
+    :returns: ``True`` for a headless CLI harness, else ``False``.
+    """
+    if harness is None:
+        return False
+    return (canonicalize_harness(harness) or harness) in HEADLESS_HARNESSES
 
 
 def native_terminal_name(harness: str | None) -> str | None:

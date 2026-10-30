@@ -114,6 +114,11 @@ class HarnessContribution:
     harness_modules: dict[str, str] = field(default_factory=dict)
     aliases: dict[str, str] = field(default_factory=dict)
     native_harnesses: frozenset[str] = frozenset()
+    # Headless CLI-subprocess harnesses (e.g. ``grok-native``) that must NOT
+    # get an auto-created REPL terminal: they spawn a vendor CLI per turn
+    # (--single/--resume) and never attach a tmux/PTY pane. The runner's
+    # generic non-native branch consults this set to skip the REPL terminal.
+    headless_harnesses: frozenset[str] = frozenset()
     native_agents: tuple[NativeCodingAgent, ...] = ()
     native_providers: tuple[NativeHarnessProvider, ...] = ()
     install_specs: dict[str, HarnessInstallSpec] = field(default_factory=dict)
@@ -612,6 +617,21 @@ _BUILTIN_CAPABILITIES: dict[str, HarnessCapabilities] = {
         interrupt=True,
         streaming=True,
     ),
+    # grok-native is a headless CLI subprocess (Grok CLI --single + JSON), not
+    # a native TUI/tmux harness. Session state lives in an isolated GROK_HOME
+    # keyed per conversation, so resume is cold (a fresh subprocess with
+    # --resume <session-id>) rather than a warm reattach to a running TUI.
+    "grok-native": _C(
+        _IM.CLI_SUBPROCESS,
+        _EL.NONE,
+        _RS.COLD_ONLY,
+        _EF.NONE,
+        _MF.MULTI,
+        _AU.OWN_AUTH,
+        subagents=False,
+        interrupt=True,
+        streaming=True,
+    ),
     "copilot": _C(
         _IM.SDK_IN_PROCESS,
         _EL.NONE,
@@ -660,6 +680,7 @@ _BUILTIN_CONTRIBUTION = HarnessContribution(
             "goose-native",
             "hermes",
             "hermes-native",
+            "grok-native",
             "kimi",
             "kimi-native",
             "kiro-native",
@@ -687,6 +708,7 @@ _BUILTIN_CONTRIBUTION = HarnessContribution(
         "goose-native": "omnigent.inner.goose_native_harness",
         "hermes": "omnigent.inner.hermes_harness",
         "hermes-native": "omnigent.inner.hermes_native_harness",
+        "grok-native": "omnigent.inner.grok_native_harness",
         "kimi": "omnigent.inner.kimi_harness",
         "kimi-native": "omnigent.inner.kimi_native_harness",
         "kiro-native": "omnigent.inner.kiro_native_harness",
@@ -741,6 +763,11 @@ _BUILTIN_CONTRIBUTION = HarnessContribution(
             "qwen-native",
         }
     ),
+    # Headless CLI-subprocess harnesses never create a REPL/tmux terminal.
+    # grok-native spawns `grok --single`/`--resume` per turn with a per-session
+    # GROK_HOME; it has no TUI to attach, so the runner must skip the generic
+    # `_auto_create_repl_terminal` branch for it.
+    headless_harnesses=frozenset({"grok-native"}),
     native_agents=(
         CLAUDE_NATIVE_CODING_AGENT,
         CODEX_NATIVE_CODING_AGENT,
@@ -763,6 +790,7 @@ _BUILTIN_CONTRIBUTION = HarnessContribution(
         "copilot": "HARNESS_COPILOT_MODEL",
         "cursor": "HARNESS_CURSOR_MODEL",
         "goose": "HARNESS_GOOSE_MODEL",
+        "grok-native": "HARNESS_GROK_MODEL",
         "kimi": "HARNESS_KIMI_MODEL",
         "openai-agents": "HARNESS_OPENAI_AGENTS_MODEL",
         "pi": "HARNESS_PI_MODEL",
@@ -789,6 +817,7 @@ _BUILTIN_CONTRIBUTION = HarnessContribution(
         "codex": "Codex",
         "copilot": "Copilot",
         "cursor": "Cursor",
+        "grok-native": "Grok",
         # openai-agents is intentionally omitted from the picker catalog: it
         # stays a valid harness for YAML specs (and the credential-free
         # integration mock LLM), but is no longer offered as a UI pick.
@@ -1002,6 +1031,11 @@ def accepted_harnesses() -> frozenset[str]:
 def native_harnesses() -> frozenset[str]:
     """Return native CLI harness ids and native aliases."""
     return _merge_set("native_harnesses")
+
+
+def headless_harnesses() -> frozenset[str]:
+    """Return headless CLI-subprocess harness ids (never create a REPL terminal)."""
+    return _merge_set("headless_harnesses")
 
 
 def native_agents() -> tuple[NativeCodingAgent, ...]:
