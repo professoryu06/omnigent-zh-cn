@@ -12,7 +12,9 @@ EFFORT_CLEAR_VALUES = frozenset({"default", "off", "reset"})
 OPENAI_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh"})
 ANTHROPIC_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 CLAUDE_EFFORTS = ANTHROPIC_EFFORTS
-CODEX_EFFORTS = OPENAI_EFFORTS
+# Codex app-server accepts the OpenAI effort set plus product ``max``
+# (Omnigent subscription policy pins max when effort is unset).
+CODEX_EFFORTS = OPENAI_EFFORTS | frozenset({"max"})
 OPENAI_AGENTS_EFFORTS = OPENAI_EFFORTS
 GEMINI_EFFORTS = frozenset({"low", "medium", "high"})
 ANTIGRAVITY_EFFORTS = GEMINI_EFFORTS

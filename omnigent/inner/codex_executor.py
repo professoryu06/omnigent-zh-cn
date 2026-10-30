@@ -97,7 +97,14 @@ _TURN_COMPLETED_DRAIN_SECONDS = 1.0
 _CODEX_VERSION_PROBE_TIMEOUT_SECONDS = 5.0
 _STDERR_CHUNK_LIMIT = 65536
 _STREAM_READ_CHUNK_SIZE = 65536
-_OPENAI_CODEX_DEFAULT_MODEL = "gpt-5.4-mini"
+# Omnigent Codex *subscription* product policy (non-gateway path):
+# only ``gpt-5.6-luna`` with ``reasoning_effort=max`` when the caller
+# has not supplied a concrete model / effort. Do not silently fall
+# back to mini / sol / other pool defaults on this path.
+# Gateway / Databricks / custom ``model_provider`` paths keep their
+# own resolution (see ``run_turn`` and gateway constructor branches).
+_OPENAI_CODEX_DEFAULT_MODEL = "gpt-5.6-luna"
+_OPENAI_CODEX_DEFAULT_REASONING_EFFORT = "max"
 # Databricks-specific default model for the Databricks-profile-derivation
 # gateway path (no gateway base URL supplied directly). The neutral
 # generic-provider gateway path never uses this — it requires the Omnigent producer
@@ -2355,8 +2362,9 @@ class CodexExecutor(Executor):
         # cfg.model (per-request /model override) wins over the spec
         # default (HARNESS_CODEX_MODEL → self._model_override). The final
         # fallback is the Databricks default only on the Databricks-profile
-        # gateway path; the neutral gateway path (and the built-in path) never
-        # select a ``databricks-*`` model.
+        # gateway path; the neutral gateway path fails loud without a model;
+        # the built-in OpenAI subscription path pins the product default
+        # (``gpt-5.6-luna``) — never mini/sol silent fallbacks.
         model = (
             cfg.model
             or self._model_override
@@ -2382,6 +2390,11 @@ class CodexExecutor(Executor):
         except ValueError as exc:
             yield ExecutorError(message=str(exc), retryable=False)
             return
+        # Subscription (non-gateway) product policy: pin effort to max
+        # when the turn did not request one. Gateway / Databricks keep
+        # caller-supplied-or-None semantics so custom routing is unchanged.
+        if reasoning_effort is None and not self._gateway:
+            reasoning_effort = _OPENAI_CODEX_DEFAULT_REASONING_EFFORT
 
         app_session = await self._ensure_app_session(
             state,
